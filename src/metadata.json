@@ -1,0 +1,20 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Claude"
+            }
+        ],
+        "Category": "Appearance",
+        "Description": "Per-channel subpixel correction for QD-OLED colour fringing",
+        "EnabledByDefault": false,
+        "Icon": "preferences-desktop-display",
+        "Id": "fringeshift",
+        "License": "GPL-3.0+",
+        "Name": "Fringe Shift",
+        "Version": "0.2.2",
+        "Website": "https://github.com/"
+    },
+    "X-KDE-ConfigModule": "kwin_fringeshift_config",
+    "org.kde.kwin.effect": {}
+}

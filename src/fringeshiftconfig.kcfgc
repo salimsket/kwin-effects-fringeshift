@@ -1,0 +1,4 @@
+File=fringeshiftconfig.kcfg
+ClassName=FringeShiftSettings
+NameSpace=KWin
+Singleton=true

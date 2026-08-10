@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FringeShiftKCM</class>
+ <widget class="QWidget" name="FringeShiftKCM">
+  <layout class="QVBoxLayout" name="rootLayout">
+   <item>
+    <!-- Text and message type are set in FringeShiftKCM.cpp, which decides
+         between them by reading the current font settings. -->
+    <widget class="KMessageWidget" name="subPixelNotice"/>
+   </item>
+   <item>
+    <!-- Presets. These only write the widgets below; the commit is Apply's, like
+         every other control on the page. Values and rationale live in
+         presets.conf, and the table in FringeShiftKCM.cpp names the block each
+         button reproduces. -->
+    <layout class="QHBoxLayout" name="presetLayout">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="presetLabel">
+       <property name="text">
+        <string>Preset:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetMpeButton">
+       <property name="text">
+        <string>MPE</string>
+       </property>
+       <property name="toolTip">
+        <string>Emitter lattice measured across ~60 cells of a macro photograph, so per-cell reading error averages out. Separations 0.437 px vertical, 0.449 px horizontal.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetSpeButton">
+       <property name="text">
+        <string>SPE</string>
+       </property>
+       <property name="toolTip">
+        <string>The same panel read from the scale drawing of one cell: 0.472 px vertical, 0.441 px horizontal. The only preset here that shifts green sideways.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetOsorioButton">
+       <property name="text">
+        <string>Osorio</string>
+       </property>
+       <property name="toolTip">
+        <string>Not a measurement of the panel but of a working correction: sample rectangles moved by hand on live hardware until the fringing went away. 0.450 px vertical, 0.475 px horizontal — and what this effect ships with.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetTriadButton">
+       <property name="text">
+        <string>Triad</string>
+       </property>
+       <property name="toolTip">
+        <string>Vertical only, and roughly a third of the measured geometry: the floor of the useful range. Visible on a fringe test pattern, near invisible in normal use.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="presetSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="Line" name="presetSeparator">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QGridLayout" name="gridLayout">
+     <property name="horizontalSpacing">
+      <number>8</number>
+     </property>
+     <!-- Column stretch is set in FringeShiftKCM.cpp: ki18n's uic wrapper puts
+          every <string> property through tr2i18n(), which does not compile
+          against setColumnStretch(int, int). -->
+
+     <!-- Red -->
+     <item row="0" column="0">
+      <widget class="QLabel" name="redLabel">
+       <property name="text">
+        <string>Red:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="redXLabel">
+       <property name="text">
+        <string>X:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="2">
+      <widget class="QSlider" name="redXSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="3">
+      <widget class="QDoubleSpinBox" name="kcfg_RedX">
+       <property name="toolTip">
+        <string>Horizontal shift of the red channel. Positive values move it right.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="4">
+      <widget class="QLabel" name="redYLabel">
+       <property name="text">
+        <string>Y:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="5">
+      <widget class="QSlider" name="redYSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="6">
+      <widget class="QDoubleSpinBox" name="kcfg_RedY">
+       <property name="toolTip">
+        <string>Vertical shift of the red channel. Positive values move it down.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Green -->
+     <item row="1" column="0">
+      <widget class="QLabel" name="greenLabel">
+       <property name="text">
+        <string>Green:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLabel" name="greenXLabel">
+       <property name="text">
+        <string>X:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="2">
+      <widget class="QSlider" name="greenXSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="3">
+      <widget class="QDoubleSpinBox" name="kcfg_GreenX">
+       <property name="toolTip">
+        <string>Horizontal shift of the green channel. Positive values move it right.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="4">
+      <widget class="QLabel" name="greenYLabel">
+       <property name="text">
+        <string>Y:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="5">
+      <widget class="QSlider" name="greenYSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="6">
+      <widget class="QDoubleSpinBox" name="kcfg_GreenY">
+       <property name="toolTip">
+        <string>Vertical shift of the green channel. Positive values move it down.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Blue -->
+     <item row="2" column="0">
+      <widget class="QLabel" name="blueLabel">
+       <property name="text">
+        <string>Blue:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLabel" name="blueXLabel">
+       <property name="text">
+        <string>X:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="2">
+      <widget class="QSlider" name="blueXSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="3">
+      <widget class="QDoubleSpinBox" name="kcfg_BlueX">
+       <property name="toolTip">
+        <string>Horizontal shift of the blue channel. Positive values move it right.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="4">
+      <widget class="QLabel" name="blueYLabel">
+       <property name="text">
+        <string>Y:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="5">
+      <widget class="QSlider" name="blueYSlider">
+       <property name="minimumWidth">
+        <number>110</number>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="6">
+      <widget class="QDoubleSpinBox" name="kcfg_BlueY">
+       <property name="toolTip">
+        <string>Vertical shift of the blue channel. Positive values move it down.</string>
+       </property>
+       <property name="suffix">
+        <string> px</string>
+       </property>
+       <property name="decimals">
+        <number>3</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Separator -->
+     <item row="3" column="0" colspan="7">
+      <widget class="Line" name="separator">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Sharpen -->
+     <item row="4" column="0">
+      <widget class="QLabel" name="sharpenLabel">
+       <property name="text">
+        <string>Sharpen:</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1" colspan="5">
+      <widget class="QSlider" name="sharpenSlider">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="tickPosition">
+        <enum>QSlider::TicksBelow</enum>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="6">
+      <widget class="QDoubleSpinBox" name="kcfg_Sharpen">
+       <property name="toolTip">
+        <string>Unsharp amount layered on top of the shift. Zero disables sharpening.</string>
+       </property>
+       <property name="decimals">
+        <number>2</number>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+
+     <!-- Toggles -->
+     <item row="5" column="0" colspan="7">
+      <layout class="QHBoxLayout" name="toggleLayout">
+       <property name="spacing">
+        <number>16</number>
+       </property>
+       <item>
+        <widget class="QCheckBox" name="kcfg_Bicubic">
+         <property name="text">
+          <string>Bicubic</string>
+         </property>
+         <property name="toolTip">
+          <string>Catmull-Rom resample. Unchecked falls back to bilinear: softer, but free of ringing.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="kcfg_Adaptive">
+         <property name="text">
+          <string>Adaptive</string>
+         </property>
+         <property name="toolTip">
+          <string>Restrict sharpening to text-like pixels. Never affects the channel shift itself.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="toggleSpacer">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>0</width>
+           <height>0</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <spacer name="bottomSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>0</width>
+       <height>0</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>KMessageWidget</class>
+   <extends>QFrame</extends>
+   <header>KMessageWidget</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

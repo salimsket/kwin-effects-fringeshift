@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd" >
+    <kcfgfile arg="true"/>
+    <group name="Effect-fringeshift">
+        <!-- Per-channel content shift in physical pixels.
+             +X moves that channel's content right, +Y moves it down.
+
+             Two separations carry the whole correction —
+
+               G <-> R/B  0.450 px vertical    the green/magenta fringe;
+                                               green alone occupies the top of
+                                               the cell, red+blue the bottom
+               R <-> B    0.476 px horizontal  the orthogonal artefact, red on
+                                               left edges, blue on right
+
+             The vertical pair is written UNCENTRED, green +0.300 against red
+             and blue -0.150. The shader subtracts the midpoint of the three
+             before resampling, so what actually reaches the resample is
+             +/-0.225 and no channel carries a fraction larger than that; the
+             uncentred spelling is just the emitter geometry read literally.
+             The horizontal pair is already symmetric, so centring is a no-op
+             on it.
+
+             These sit a little wider than either measured read of the panel:
+             presets.conf carries both (0.437 vertical / 0.449 horizontal from
+             the lattice average, 0.472 / 0.441 from the single-cell drawing)
+             along with the arithmetic behind them. -->
+        <entry name="RedX" type="Double">
+            <default>0.238</default>
+        </entry>
+        <entry name="RedY" type="Double">
+            <default>-0.150</default>
+        </entry>
+        <entry name="GreenX" type="Double">
+            <default>0.0</default>
+        </entry>
+        <entry name="GreenY" type="Double">
+            <default>0.300</default>
+        </entry>
+        <entry name="BlueX" type="Double">
+            <default>-0.238</default>
+        </entry>
+        <entry name="BlueY" type="Double">
+            <default>-0.150</default>
+        </entry>
+
+        <!-- Unsharp amount layered on top of the shift, 0.0 .. 1.5. -->
+        <entry name="Sharpen" type="Double">
+            <default>0.0</default>
+        </entry>
+        <!-- Catmull-Rom resample; false falls back to bilinear (softer, no ringing). -->
+        <entry name="Bicubic" type="Bool">
+            <default>true</default>
+        </entry>
+        <!-- Gate Sharpen to text-like pixels. Never gates the shift itself. -->
+        <entry name="Adaptive" type="Bool">
+            <default>true</default>
+        </entry>
+        <!-- Debug: render the text mask instead of the corrected image. -->
+        <entry name="ShowMask" type="Bool">
+            <default>false</default>
+        </entry>
+    </group>
+</kcfg>

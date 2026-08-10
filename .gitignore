@@ -1,0 +1,12 @@
+# Build output
+build/
+
+# Nix
+result
+result-*
+.direnv/
+.envrc
+
+# Tooling
+.claude/
+skills-lock.json

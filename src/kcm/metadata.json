@@ -1,0 +1,8 @@
+{
+    "KPlugin": {
+        "Description": "Per-channel subpixel correction for QD-OLED colour fringing",
+        "Icon": "preferences-desktop-display",
+        "License": "GPL-3.0+",
+        "Name": "Fringe Shift"
+    }
+}
