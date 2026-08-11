@@ -1,5 +1,7 @@
 > [!CAUTION]
-> This is a 100% Claude generated slop repo.
+> This is a 100% Claude generated repository.
+
+<img width="1450" height="514" alt="kde-effects-fringeshift" src="https://github.com/user-attachments/assets/4814f9da-b522-441d-b58d-5ebb625dfab7" />
 
 # Fringe Shift
 
