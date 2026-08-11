@@ -12,8 +12,7 @@
         "Id": "fringeshift",
         "License": "GPL-3.0+",
         "Name": "Fringe Shift",
-        "Version": "0.2.2",
-        "Website": "https://github.com/"
+        "Version": "0.2.2"
     },
     "X-KDE-ConfigModule": "kwin_fringeshift_config",
     "org.kde.kwin.effect": {}
