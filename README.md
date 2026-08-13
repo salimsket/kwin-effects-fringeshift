@@ -11,7 +11,7 @@ a fraction of a pixel the other way. Whole screen, not just text.
 
 ## KWin Effect config
 
-<img width="997" height="729" alt="image" src="https://github.com/user-attachments/assets/2b72319c-5e33-424e-837c-daf7f94ea699" />
+<img width="1154" height="787" alt="image" src="https://github.com/user-attachments/assets/2c997fd8-3d6a-462a-9218-59c65db6d861" />
 
 ## Requirements
 
