@@ -9,6 +9,10 @@ A KWin (Plasma 6) effect that kills QD-OLED colour fringing — the green halo
 above edges and the warm one below — by shifting each colour channel's content
 a fraction of a pixel the other way. Whole screen, not just text.
 
+## KWin Effect config
+
+<img width="997" height="729" alt="image" src="https://github.com/user-attachments/assets/2b72319c-5e33-424e-837c-daf7f94ea699" />
+
 ## Requirements
 
 You need Plasma 6 and, critically, **KWin's development headers for the exact
