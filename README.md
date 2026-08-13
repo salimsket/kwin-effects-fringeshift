@@ -9,6 +9,9 @@ A KWin (Plasma 6) effect that kills QD-OLED colour fringing — the green halo
 above edges and the warm one below — by shifting each colour channel's content
 a fraction of a pixel the other way. Whole screen, not just text.
 
+Ported from FringeShift by Resolve:
+[How I fixed text on my QD-OLED monitor (not MacType)](https://www.youtube.com/watch?v=StNJVwCgMKY)
+
 ## KWin Effect config
 
 <img width="1154" height="787" alt="image" src="https://github.com/user-attachments/assets/2c997fd8-3d6a-462a-9218-59c65db6d861" />
