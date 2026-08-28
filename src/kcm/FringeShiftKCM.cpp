@@ -91,16 +91,17 @@ constexpr FringeShiftParams spe{
     .shiftB = {-0.221f, -0.236f},
 };
 /**
- * Sample rectangles converged by hand on live hardware. 0.450 / 0.475 px.
+ * Read directly off a labelled reference diagram of the panel's subpixel
+ * layout and confirmed by eye on live hardware with fringe-tune.
  *
- * Identical to the schema's defaults, so this button and "Defaults" agree — but
- * only by coincidence of the current .kcfg, and the button says which reading it
- * is where "Defaults" cannot.
+ * Identical to the schema's defaults, deliberately: this IS the current
+ * default reading, and the button exists so the dialog states which reading
+ * it is where "Defaults" cannot.
  */
 constexpr FringeShiftParams osorio{
-    .shiftR = {0.238f, -0.150f},
-    .shiftG = {0.0f, 0.300f},
-    .shiftB = {-0.238f, -0.150f},
+    .shiftR = {0.2000f, -0.3000f},
+    .shiftG = {0.0500f, 0.2000f},
+    .shiftB = {-0.3000f, -0.3000f},
 };
 /** Vertical only, ~0.3x the measured geometry: the floor of the useful range. */
 constexpr FringeShiftParams triad{

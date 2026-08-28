@@ -167,9 +167,9 @@ qdbus6 org.kde.KWin /KWin reconfigure
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `RedX` / `RedY` | `0.238` / `-0.150` | red content shift, px |
-| `GreenX` / `GreenY` | `0.0` / `0.300` | green content shift, px |
-| `BlueX` / `BlueY` | `-0.238` / `-0.150` | blue content shift, px |
+| `RedX` / `RedY` | `0.200` / `-0.300` | red content shift, px |
+| `GreenX` / `GreenY` | `0.050` / `0.200` | green content shift, px |
+| `BlueX` / `BlueY` | `-0.300` / `-0.300` | blue content shift, px |
 | `Sharpen` | `0.0` | unsharp amount on top of the shift, 0 – 1.5 |
 | `Bicubic` | `true` | Catmull-Rom resample; `false` = bilinear (softer, no ringing) |
 | `Adaptive` | `true` | gate `Sharpen` to text-like pixels (never gates the shift) |
@@ -179,10 +179,12 @@ Shifts are clamped to ±1 px. `ShowMask` is a debug flag with no widget on the
 settings page; set it by hand. With every shift at 0 and `Sharpen` at 0 the
 effect unredirects every window, so an all-zero configuration costs nothing.
 
-The defaults carry two separations: 0.450 px vertically between green and the
-red/blue pair beneath it (the green/magenta fringe itself), and 0.476 px
-horizontally between red and blue (red on left edges, blue on right). Why they
-are written the way they are is [below](#where-the-default-numbers-come-from).
+The defaults carry two separations, both 0.500 px: vertically between green
+and the red/blue pair beneath it (the green/magenta fringe itself), and
+horizontally between red and blue (red on left edges, blue on right) — a
+symmetric diamond in the reference diagram this reading was taken from. Why
+they are written the way they are is
+[below](#where-the-default-numbers-come-from).
 
 ## Known limits
 
@@ -221,33 +223,44 @@ UI chrome included.
 
 ## Where the default numbers come from
 
-The vertical pair is written *uncentred*, `GreenY 0.300` against `RedY`/`BlueY`
-−0.150, which is the emitter geometry read literally: one upper emitter against
-two lower ones. The shader subtracts the midpoint of the three before
-resampling, so what reaches the resample is ±0.225 and no channel carries a
-larger fraction; writing the same geometry centred is bit-identical.
+Read directly off a labelled reference diagram of this panel's subpixel
+layout — two sample points per emitter, so the repeating tile is visible, not
+just one cell — and confirmed by eye on live hardware with `fringe-tune`.
+Content shift is the emitter's position negated (an emitter sitting high or
+left gets a positive, i.e. opposite, correction), except `GreenX`, which the
+diagram places close enough to the R/B horizontal midpoint that live tuning,
+not the diagram, got the final sign.
 
-`presets.conf` archives two independent measurements of the panel —
-0.437/0.449 vertical/horizontal from the lattice average, 0.472/0.441 from the
-single-cell drawing — which the shipped values sit slightly wider than. It also
-holds the derivations and the sets that did not earn a preset button; nothing
-reads it at runtime.
+The values are written *uncentred* — `RedY`/`BlueY` −0.300 against `GreenY`
+0.200 — which is the emitter geometry read literally. The shader subtracts
+the mean of the three before resampling, so what reaches the resample is
+±0.250 on every channel and no channel carries a larger fraction; writing the
+same geometry pre-centred is bit-identical.
+
+`presets.conf` (`OSORIO`) carries the diagram coordinates and the full
+derivation, plus twenty synthetic variants for by-eye comparison via
+`fringe-presets`. `presets.legacy.conf` holds the earlier readings this
+superseded — a lattice average from a macro photograph (0.437/0.449 px), a
+single-cell scale drawing (0.472/0.441 px), and their consensus — along with
+the sets that never earned a preset button. Nothing in either file is read at
+runtime.
 
 ## Nominal versus delivered shift
 
 A configured shift is a **nominal**, not a delivered, displacement. Catmull-Rom
 is an interpolating kernel, not an ideal one, so its phase response
 under-delivers the requested offset by an amount that grows with frequency:
-measured 0.982 of nominal at f = 1/16 cyc/px and 0.733 at f = 0.25, the
-text-edge end. Ask for the default preset's ±0.225 px of centred green and
-roughly 0.165 px arrives where it matters most.
+measured 0.982 of nominal at f = 1/16 cyc/px and 0.736 at f = 0.25, the
+text-edge end. Ask for the default preset's ±0.250 px of centred green and
+roughly 0.184 px arrives where it matters most.
 
 Gain depends on the fraction as well as the frequency — the in-phase Laplacian
 term grows as its square and partly offsets the kernel's phase lag, so smaller
-shifts deliver a slightly smaller proportion (the former 0.10 px default read
-0.680 at f = 0.25, not 0.733). The response stays proportional to within a few
-percent (see `proportional-shift` below), so this is a scale factor to be aware
-of when reading a preset, not a non-linearity.
+shifts deliver a slightly smaller proportion (the 0.225 px default that shipped
+before OSORIO read 0.733 at f = 0.25, and a 0.10 px one before that read
+0.680). The response stays proportional to within a few percent (see
+`proportional-shift` below), so this is a scale factor to be aware of when
+reading a preset, not a non-linearity.
 
 ## How it works
 
@@ -256,7 +269,9 @@ of when reading a preset, not a non-linearity.
 
 - the three shifts are centred about zero, so no channel carries a larger
   fractional offset than the others (an uncentred set makes grey text read
-  reddish — measured 16 % chromatic mismatch at G +0.30 / RB −0.15);
+  reddish — measured 16 % chromatic mismatch at the previous default, G +0.30
+  / RB −0.15; OSORIO's own raw values, G +0.20 / RB −0.30, would carry the
+  same kind of mismatch if the shader skipped this step);
 - each shift splits into an exact integer texel step plus a fraction; only the
   fraction is filtered;
 - per channel, a Catmull-Rom (or bilinear) resample gives true sub-pixel

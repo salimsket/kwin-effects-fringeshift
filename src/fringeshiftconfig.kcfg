@@ -8,43 +8,35 @@
         <!-- Per-channel content shift in physical pixels.
              +X moves that channel's content right, +Y moves it down.
 
-             Two separations carry the whole correction —
+             OSORIO: read directly off a labelled reference diagram of this
+             panel's actual subpixel layout (two sample points per emitter,
+             so the repeating tile is visible, not just one cell) and
+             confirmed by eye on live hardware with fringe-tune. Superseded
+             the earlier scale-drawing/macro-photo/consensus readings this
+             file shipped before; see presets.conf's OSORIO section for the
+             diagram coordinates and the derivation, and
+             presets.legacy.conf for what used to be here.
 
-               G <-> R/B  0.450 px vertical    the green/magenta fringe;
-                                               green alone occupies the top of
-                                               the cell, red+blue the bottom
-               R <-> B    0.476 px horizontal  the orthogonal artefact, red on
-                                               left edges, blue on right
-
-             The vertical pair is written UNCENTRED, green +0.300 against red
-             and blue -0.150. The shader subtracts the midpoint of the three
-             before resampling, so what actually reaches the resample is
-             +/-0.225 and no channel carries a fraction larger than that; the
-             uncentred spelling is just the emitter geometry read literally.
-             The horizontal pair is already symmetric, so centring is a no-op
-             on it.
-
-             These sit a little wider than either measured read of the panel:
-             presets.conf carries both (0.437 vertical / 0.449 horizontal from
-             the lattice average, 0.472 / 0.441 from the single-cell drawing)
-             along with the arithmetic behind them. -->
+             Not zero-mean: the shader's own centring step (subtract the
+             mean of the three, per axis) handles that at render time, so
+             the raw diagram numbers are written here unmodified. -->
         <entry name="RedX" type="Double">
-            <default>0.238</default>
+            <default>0.2000</default>
         </entry>
         <entry name="RedY" type="Double">
-            <default>-0.150</default>
+            <default>-0.3000</default>
         </entry>
         <entry name="GreenX" type="Double">
-            <default>0.0</default>
+            <default>0.0500</default>
         </entry>
         <entry name="GreenY" type="Double">
-            <default>0.300</default>
+            <default>0.2000</default>
         </entry>
         <entry name="BlueX" type="Double">
-            <default>-0.238</default>
+            <default>-0.3000</default>
         </entry>
         <entry name="BlueY" type="Double">
-            <default>-0.150</default>
+            <default>-0.3000</default>
         </entry>
 
         <!-- Unsharp amount layered on top of the shift, 0.0 .. 1.5. -->

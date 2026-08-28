@@ -383,10 +383,14 @@ int main(int argc, char **argv)
         // 4. The Laplacian term flattens the interpolator's MTF, so the resample
         //    must not soften. The band is one-sided in effect: an uncompensated
         //    Catmull-Rom loses several percent here, and what is measured is a
-        //    small OVERSHOOT (1.032 at the shipped preset), because the
-        //    compensation is quadratic in the fraction and slightly overpays at
-        //    this one. That figure tracks the default; the 0.219 px preset read
-        //    1.030 and a 0.10 px one is nearer flat.
+        //    small OVERSHOOT (1.042 at the shipped OSORIO preset's 0.250 px
+        //    centred fraction), because the compensation is quadratic in the
+        //    fraction and slightly overpays at this one. That figure tracks the
+        //    default; the 0.219 px preset read 1.030, a 0.225 px one 1.032, and
+        //    a 0.10 px one is nearer flat. OSORIO's larger fraction leaves less
+        //    headroom under the 0.05 threshold below (0.042 measured) than the
+        //    earlier defaults did -- recompute before raising the default shift
+        //    further.
         {
             double worst = 0.0;
             std::string detail;
@@ -400,9 +404,13 @@ int main(int argc, char **argv)
 
         // 5. Centring equalises the per-channel fractional shifts, so all three
         //    channels must move by the SAME distance, green opposing red and
-        //    blue. An uncentred set would give green twice the fraction of the
-        //    other two — the 16% chromatic mismatch the README cites. Note this
-        //    says nothing about the absolute distance; that is checks 6 and 7.
+        //    blue. Skipping centring would leave OSORIO's raw Y values (-0.30,
+        //    +0.20, -0.30) as the delivered fractions directly -- green getting
+        //    two thirds of red/blue's fraction instead of matching it -- which
+        //    is the kind of mismatch the earlier 0.30/-0.15 default's 16%
+        //    chromatic-mismatch figure (still in the README) illustrated. Note
+        //    this says nothing about the absolute distance; that is checks 6
+        //    and 7.
         {
             const double shiftRed = displacement(analyse(input, 0, highFrequency), analyse(output, 0, highFrequency), highFrequency);
             const double shiftGreen = displacement(analyse(input, 1, highFrequency), analyse(output, 1, highFrequency), highFrequency);
@@ -429,17 +437,19 @@ int main(int argc, char **argv)
         //    phasors and add the (in-phase) Laplacian term:
         //        H(f) = SUM w_i(frac) e^{i 2 pi f o_i} + k * 2 * (1 - cos(2 pi f))
         //        delivered = -arg(H) / (2 pi f)
-        //    which gives 0.982 of nominal at f = 1/16 and 0.733 at f = 1/4 for
-        //    the shipped preset's centred 0.225 px, and reproduces the measured
-        //    values below to five digits. The bands are tight enough that any
-        //    change to the resample or the compensation term leaves them.
+        //    which gives 0.982 of nominal at f = 1/16 and 0.736 at f = 1/4 for
+        //    the shipped OSORIO preset's centred 0.250 px, and reproduces the
+        //    measured values below to five digits. The bands are tight enough
+        //    that any change to the resample or the compensation term leaves
+        //    them.
         //
         //    THESE BANDS TRACK THE DEFAULT SHIFT, so changing the shipped preset
         //    moves them: gain is a function of the fraction, not a constant of
         //    the kernel. Larger fractions deliver MORE of what was asked, since
         //    the in-phase Laplacian term grows as the square of the fraction and
-        //    partly offsets the kernel's phase lag. The previous 0.10 px default
-        //    read 0.979 / 0.680 here. Recompute from the closed form above
+        //    partly offsets the kernel's phase lag. The 0.225 px default that
+        //    shipped before OSORIO read 0.982 / 0.733 here, and the 0.10 px one
+        //    before that 0.979 / 0.680. Recompute from the closed form above
         //    before concluding the harness has broken.
         {
             const double nominal = centredFraction(defaults);
@@ -466,16 +476,17 @@ int main(int argc, char **argv)
         //    Gain is not perfectly flat across scales — the compensation
         //    coefficient k is quadratic in the fraction, so a larger shift also
         //    gets slightly more of the in-phase Laplacian term. Measured spread
-        //    is ~0.06 over a 4x range of requested shift (0.670 -> 0.733 at
-        //    f = 1/4), i.e. proportional to within a few percent, with no floor
-        //    of the kind the old path had.
+        //    is ~0.06 over a 4x range of requested shift (0.674 -> 0.736 at
+        //    f = 1/4, OSORIO's 0.250 px default), i.e. proportional to within a
+        //    few percent, with no floor of the kind the old path had.
         //
         //    The spread scales with the default too, for the same reason as
         //    check 6: k grows as the square of the fraction, so a bigger base
-        //    spans a bigger range of k. The 0.10 px default spread ~0.03 here.
-        //    What is being asserted is the ABSENCE of a floor — ratios[0], the
-        //    smallest shift, still delivering two thirds of nominal — not a
-        //    particular flatness.
+        //    spans a bigger range of k. The 0.225 px default that shipped before
+        //    OSORIO spread ~0.06 here too (0.670 -> 0.733); the 0.10 px one
+        //    before that spread ~0.03. What is being asserted is the ABSENCE of
+        //    a floor — ratios[0], the smallest shift, still delivering two
+        //    thirds of nominal — not a particular flatness.
         {
             constexpr std::array<float, 3> scales{0.25f, 0.5f, 1.0f};
             std::array<double, 3> ratios{};
