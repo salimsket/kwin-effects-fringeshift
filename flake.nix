@@ -15,6 +15,17 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
         f (import nixpkgs { inherit system; }));
+
+      # KWin's shader include files (colormanagement.glsl, saturation.glsl, ...)
+      # from the source of the same pinned KWin. KWin compiles them into its
+      # binary, so no output of kdePackages.kwin has them as files. The tests
+      # compile the effect's shader against them with glslangValidator. The
+      # nixpkgs patches to KWin do not touch these files.
+      kwinShaderSources = pkgs: pkgs.runCommand "kwin-shader-sources" { } ''
+        mkdir -p $out
+        tar -xJf ${pkgs.kdePackages.kwin.src} -C $out --strip-components=3 \
+          --wildcards '*/src/opengl/*.glsl'
+      '';
     in
     {
       packages = forAllSystems (pkgs: rec {
@@ -42,6 +53,7 @@
             kdePackages.extra-cmake-modules
             kdePackages.qttools        # lrelease / lupdate for i18n
             kdePackages.wrapQtAppsHook
+            glslang                    # shader check against KWin's real includes
           ];
 
           buildInputs = with pkgs; [
@@ -54,7 +66,7 @@
 
             kdePackages.kconfig
             kdePackages.kconfigwidgets
-            kdePackages.kglobalaccel    # Ctrl+Alt+F9 toggle
+            kdePackages.kglobalaccel    # Meta+Ctrl+F9 toggle
             kdePackages.kcmutils       # KCM for the effect's settings page
             kdePackages.kcoreaddons
             kdePackages.ki18n
@@ -94,6 +106,7 @@
             # KDEInstallDirs resolves that relative to CMAKE_INSTALL_PREFIX, so the
             # plugin lands in $out and gets picked up via QT_PLUGIN_PATH.
             (pkgs.lib.cmakeFeature "KDE_INSTALL_USE_QT_SYS_PATHS" "OFF")
+            (pkgs.lib.cmakeFeature "FRINGESHIFT_KWIN_SHADER_DIR" "${kwinShaderSources pkgs}")
           ];
 
           meta = with pkgs.lib; {
@@ -107,6 +120,10 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.fringeshift ];
+
+          # Read by CMakeLists.txt when the cache variable is not set, so a
+          # plain `cmake -B build` in this shell enables the shader-kwin-* tests.
+          FRINGESHIFT_KWIN_SHADER_DIR = "${kwinShaderSources pkgs}";
 
           packages = with pkgs; [
             # toolchain — these are what were missing from the bare shell

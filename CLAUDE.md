@@ -11,15 +11,15 @@ Five source files, ~500 lines total, and the split is lopsided on purpose:
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [src/shaders/fringeshift.frag](src/shaders/fringeshift.frag) | ~250 | **All of the signal processing.** The actual product. |
-| [src/fringeshifteffect.cpp](src/fringeshifteffect.cpp) | ~210 | KWin/Qt lifecycle glue: shader load, window redirection, shortcut. |
-| [src/fringeshifteffect.h](src/fringeshifteffect.h) | ~90 | Class declaration. |
+| [src/shaders/fringeshift.frag](src/shaders/fringeshift.frag) | ~280 | **All of the signal processing.** The actual product. |
+| [src/fringeshifteffect.cpp](src/fringeshifteffect.cpp) | ~270 | KWin/Qt lifecycle glue: shader load, window redirection, shortcut. |
+| [src/fringeshifteffect.h](src/fringeshifteffect.h) | ~120 | Class declaration. |
 | [src/fringeshiftparams.h](src/fringeshiftparams.h) / [.cpp](src/fringeshiftparams.cpp) | ~200 | The shader's parameter set and its preconditions. |
 | [src/fringeshiftconfig.kcfg](src/fringeshiftconfig.kcfg) | ~50 | KConfigXT schema → generates `FringeShiftSettings` at build time. |
 | [src/kcm/](src/kcm/) | ~870 | The "Configure…" page: a `.ui` form plus a `KCModule`. A separate plugin. |
 | [src/main.cpp](src/main.cpp) | ~16 | One macro. The plugin entry point. |
 | [src/metadata.json](src/metadata.json) | ~19 | KPlugin metadata, embedded into the `.so` by the factory macro. |
-| [tests/](tests/) | ~900 | Off-screen measurement harness. See "Testing" below. |
+| [tests/](tests/) | ~1300 | Off-screen measurement harness and KWin-dialect check. See "Testing" below. |
 
 The C++ owns *no* image math. Every pixel decision lives in GLSL. Anything that
 changes how the correction looks belongs in the `.frag`; the `.cpp` only decides
@@ -65,10 +65,26 @@ window stays redirected either way — only that frame's route changes.
 - `m_shader` — `unique_ptr<GLShader>`, owned here, borrowed by every redirected
   window.
 
-**The central invariant** — `m_windows` is non-empty **iff** `shouldRedirect()`.
-Every path that could change the answer funnels through `updateWindows()`, which
-either redirects the whole stacking order or unredirects everything.
-`slotWindowAdded()` re-checks it because a new window arrives outside that funnel.
+**The central invariant** — when `shouldRedirect()` is false, `m_windows` is
+empty; when it is true, `m_windows` holds exactly the windows that
+`wantsCorrection()` accepts. Every path that could change the answer funnels
+through `updateWindows()` (the whole stacking order, or unredirect everything) or
+`syncWindow()` (one window). `slotWindowAdded()` and
+`slotWindowFullScreenChanged()` re-check it because those events arrive outside
+`updateWindows()`.
+
+**Fullscreen windows are never redirected** (`wantsCorrection()`). Read KWin 6.8
+before you change this. `OffscreenData::maybeRender()` always renders into an
+8-bit `DRM_FORMAT_ARGB8888` buffer described as sRGB, which clips HDR and wide
+gamut. A redirected window's item also `hasEffects()`, and
+`findOverlayCandidates()` (`scene/workspacescene.cpp`) then forces the
+composited path, so the window loses direct scanout. `blocksDirectScanout()`
+returning false does not prevent this: it only means the effect does not block
+scanout for the whole screen. Every window is watched for
+`windowFullScreenChanged`, redirected or not, so one that leaves fullscreen comes
+back. An unredirect from that signal has the same GL-context guard as `toggle()`.
+If no context can be made current, the window stays redirected (drawn correctly,
+only without HDR or scanout) until the next `updateWindows()`.
 
 `FringeShiftParams::isIdentity()` is the cost gate inside it: with all shifts
 zero and `Sharpen` zero the shader would be a no-op, so the effect drops every
@@ -86,8 +102,8 @@ than scattered across the effect, the kcfg, and the shader's comments.
 `std::clamp` is specified as `v < lo ? lo : hi < v ? hi : v`, so both
 comparisons against a NaN are false and it returns the NaN untouched — and Qt's
 double parser accepts the literals `nan` and `inf`, so a typo in `kwinrc` is a
-real route to one. A single NaN uniform poisons every tap of the shader's 4×4
-footprint and blanks the window. `clampFinite()` degrades non-finite input to
+real route to one. A single NaN uniform poisons every tap of the shader's 5×5
+window and blanks the window. `clampFinite()` degrades non-finite input to
 zero rather than to a substitute, which makes the result `isIdentity()` — a
 garbled config costs nothing instead of silently displacing channels.
 
@@ -130,7 +146,8 @@ These are the parts that took real debugging. Do not "clean them up".
 `fringeshiftconfig.kcfgc` + `.kcfg` generate a singleton `KWin::FringeShiftSettings`
 at build time (`kconfig_add_kcfg_files`), bound to group `[Effect-fringeshift]` in
 `kwinrc`. `readConfig()` re-reads and clamps: shifts to ±1 px (beyond that it isn't
-a fringe fix, and the shader's 4×4 Catmull-Rom footprint stops covering the taps),
+a fringe fix, and the shader's 5×5 window holds every tap only while each centred
+shift is within ±1 px — a larger one loses taps with no error),
 `Sharpen` to 0–1.5, and non-finite values to zero. `reconfigure()` requires the
 `ReconfigureAll` *bit* — tested with `&`, not compared for equality, so adding a
 flag upstream cannot silently turn config reloads off.
@@ -190,11 +207,16 @@ including its notes on converting FreeType 26.6 emitter tables into content shif
 ## The shader
 
 [src/shaders/fringeshift.frag](src/shaders/fringeshift.frag) is written in
-core-profile spelling (`#version 140`, `in`/`out`/`texture()`), because KWin's
-preprocessor rewrites those and substitutes its own `#version` for legacy
-contexts. **One file covers both profiles**, which is why it avoids GLSL 1.30+
-built-ins (`round()`, integer `clamp()`, `textureSize()` — hence the
-`textureWidth`/`textureHeight` uniforms).
+core spelling (`#version 140`, `in`/`out`/`texture()`), but KWin never compiles
+that `#version` line. KWin 6.8 runs on **OpenGL ES only** (`eglBindAPI(EGL_OPENGL_ES_API)`),
+and `GLShader::preprocess()` deletes every `#version` line and adds its own
+prologue: `#version 300 es` plus `precision highp` on a GLES 3 context (every
+desktop GPU), or no version (GLSL ES 1.00) on GLES 2, where it also rewrites
+lines that *start* with `in ` or `out `. **One file covers both**, which is why
+it avoids what GLSL ES 1.00 lacks: `round()`, integer `clamp()`,
+`textureSize()` (hence the `textureWidth`/`textureHeight` uniforms),
+`texelFetch()`, and array indices that are not loop indices. Only the two
+declarations of `texcoord0` and `fragColor` may start a line with `in `/`out `.
 
 Pipeline in `main()`:
 
@@ -202,7 +224,8 @@ Pipeline in `main()`:
    (`sharpen > 0.001` or `showMask`). It gates **sharpness only**; the geometric
    shift is never scaled by it, because a per-pixel-scaled displacement is a
    *warp*, and the mask swings 1→0 inside a single glyph.
-2. Axis flip (`texcoord0`'s y points up; the UI convention is +Y down).
+2. Axis flip (`@FRINGESHIFT_AXIS_FLIP_Y@`, see the build shims; the UI
+   convention is +Y down).
 3. **Centre the three shifts about zero** — a shift common to all channels
    translates the image invisibly while leaving relative channel geometry
    bit-identical, and it equalises the per-channel *fractional* shifts, which is
@@ -219,7 +242,21 @@ Pipeline in `main()`:
    across a purely vertical shift; `separable-compensation` pins it.
    `ca` was fitted on a 1D grating, where `dot(f, f)` degenerates to `fy²`,
    so it carries over to the split form unchanged.
-6. **Alpha is fetched unshifted** and RGB clamps to `a`, not 1 — the texture holds
+
+   **One 5×5 window serves all three channels** (25 fetches; per channel it
+   took 64). The channels travel as the components of a `vec3`. The draw is 1:1
+   at a whole-pixel position (`offscreeneffect.cpp` rounds the window position
+   to device pixels), so `pos` sits on the centre of texel `n = floor(pos)`. The
+   tap at offset `o` is then `o + s` away from the sample point at every pixel,
+   and the weights are the kernel evaluated there — they depend only on the
+   uniforms. Each channel's Laplacian centre is `n - round(s)`, from the same
+   `floor(s + 0.5)` as the fractions, **not** `floor()` of the interpolated
+   sample position. At a fraction of exactly 0.5 that position is a tie, and
+   interpolation error in `texcoord0` would break it differently per driver and
+   window size; `half-texel-stable` pins it. The ±1 px clamp in
+   `FringeShiftParams` is what keeps every tap inside the window.
+6. **Alpha is fetched unshifted** (the window's centre tap) and RGB clamps to
+   `a`, not 1 — the texture holds
    *premultiplied* content, and displacing coverage would fray rounded corners and
    shadows.
 7. Same tail as KWin's `base.frag`, in the same order:
@@ -269,36 +306,53 @@ resolves KWin **6.8.2** (nixpkgs `0bb2eed`; `build/CMakeCache.txt` → `KWin_DIR
 ## Testing
 
 `ctest --test-dir build` runs `fringeshift-measure`, which compiles the **shipped**
-`.frag` — the configured copy in `build/shaders/`, not the source — against a surfaceless EGL context and measures it. `nix build .#` runs it
+`.frag` — the configured copy in `build/shaders/`, not the source — on a
+surfaceless **GLES 3** context and measures it. `nix build .#` runs it
 too, on llvmpipe inside the sandbox. Exit 77 means no usable GL driver and is
 wired to CTest's `SKIP_RETURN_CODE`, so a driverless host skips rather than fails
 — but only if nothing has failed yet, because the four parameter-domain checks
-run *before* the EGL setup and a failure there is real on any host.
+run *before* the EGL setup and a failure there is real on any host. A shader
+that does not compile or link throws `ShaderError`, not `GlError`, and fails on
+any host: it is never a skip.
 
-- [tests/shaderrunner.cpp](tests/shaderrunner.cpp) — the seam. EGL setup, textual
-  `#include` resolution (GLSL has none; KWin's preprocessor does this in
-  production), FBO render, readback. RGBA32F throughout, because 8-bit
-  quantisation is the same order as the MTF errors being measured.
+- [tests/shaderrunner.cpp](tests/shaderrunner.cpp) — the seam. EGL setup on
+  `EGL_OPENGL_ES_API` (as KWin does; a desktop context accepts GLSL that KWin's
+  GLES rejects, e.g. implicit `int`→`float`), FBO render, readback. RGBA32F
+  throughout, because 8-bit quantisation is the same order as the MTF errors
+  being measured. Production input is 8-bit.
+- [tests/kwinpreprocess.cpp](tests/kwinpreprocess.cpp) — a copy of KWin 6.8's
+  `GLShader::preprocess()`: both prologues, `#version` removal, recursive
+  `#include`, the GLES 2 `in`/`out` rewrite. The harness uses its GLES 3 form.
+  **Update it with KWin** if a release changes that function.
+- **`shader-kwin-es300` / `shader-kwin-es100`** — `fringeshift-preprocess` writes
+  the shader as KWin would give it to the driver, with KWin's **real**
+  `colormanagement.glsl`/`saturation.glsl`, and `glslangValidator` compiles it.
+  No GPU. This is the only test that sees a signature change in those files;
+  the stubs hide it. The files come from `FRINGESHIFT_KWIN_SHADER_DIR`, which the
+  flake fills from the pinned `kdePackages.kwin.src` (the nixpkgs KWin patches
+  do not touch them). Without it, or without `glslangValidator`, CMake leaves
+  the two tests out with a status note.
 - [tests/stubs/](tests/stubs/) — identity stand-ins for KWin's
   `colormanagement.glsl` and `saturation.glsl`, which are compiled into the
   compositor and unresolvable outside it. Faithful because the resample runs in
   the source encoding, before that tail.
-- [tests/measure.cpp](tests/measure.cpp) — fourteen checks. Ten measure the
+- [tests/measure.cpp](tests/measure.cpp) — fifteen checks. Eleven measure the
   shader, each tied to a specific README claim. The other four
   (`checkParameterDomain()`) cover `FringeShiftParams`, the only pure code here:
   the clamp range, the sharpen floor, non-finite rejection, and the
   `isIdentity()` cost gate. They need no GL and so run first.
 
-Three things to know before touching the thresholds:
+Four things to know before touching the thresholds:
 
 1. **Displacement gain is not 1, and is not a constant of the kernel.** Measured
-   0.982 of nominal at f = 1/16 and **0.733 at f = 0.25** for the shipped
-   preset's centred 0.225 px. Catmull-Rom is symmetric but not ideal, and its
+   0.982 of nominal at f = 1/16 and **0.736 at f = 0.25** for the shipped
+   preset's (OSORIO) centred 0.25 px. Catmull-Rom is symmetric but not ideal, and its
    phase response under-delivers by more as frequency rises. `shift-gain` and
    `proportional-shift` both pin values that **move when the default preset
    moves** — gain rises with the fraction, because the in-phase Laplacian term
-   is quadratic in it and partly offsets the phase lag. The 0.10 px default read
-   0.979 / 0.680, and its `proportional-shift` spread was half the current one.
+   is quadratic in it and partly offsets the phase lag. The 0.225 px default
+   before OSORIO read 0.982 / 0.733, and the 0.10 px one before that read
+   0.979 / 0.680, with a `proportional-shift` spread about half the current one.
    The closed form is in the check's comment and reproduces the measured values
    to five digits — if either check moves, compute the expected value before
    assuming the harness is wrong.
@@ -315,14 +369,24 @@ Three things to know before touching the thresholds:
    `separable-compensation` is the only check looking down the x axis. A new
    check that only varies along y inherits the same blind spot.
 
-   The shipped defaults are no longer vertical-only — they carry
-   `RedX +0.238 / BlueX -0.238` — so `defaults` now moves an x-varying grating.
+   The shipped defaults are no longer vertical-only — OSORIO carries
+   `RedX +0.20 / GreenX +0.05 / BlueX -0.30` — so `defaults` now moves an
+   x-varying grating.
    `separable-compensation` builds a vertical-only set by zeroing the x
    components rather than passing `defaults`; handing it the raw defaults
    asserts the negation of separability and fails on a correct shader. Its
    second half needs the mirror set (defaults with the *y* components zeroed),
    and derives that too — every magnitude in that check tracks the preset, so
    none of them can go stale while still passing.
+
+4. **The 256 × 256 test images hide interpolation error.** At a power-of-two
+   size every texel centre is exact in float, so `texcoord0 * size` lands on
+   `n + 0.5` exactly. Real windows are not that size; on a desktop GPU `pos` can sit
+   up to 1.5e-5 px off-centre at other sizes, with a sign that depends on driver
+   and size. Anything that takes `floor()` of an interpolated position at a tie
+   looks fine at 256 and is not. `half-texel-stable` compares 256 × 256 with
+   239 × 233 for this reason. llvmpipe breaks the old tie the same way at both
+   sizes, so that check bites on a real GPU, not in `nix build`.
 
 Adding a check is cheap: `ShaderRunner::run(image, params)` is the whole
 interface.
@@ -335,5 +399,10 @@ interface.
   line in its `upload()`, the `uniform` in the `.frag`, a `kcfg_`-named widget in
   [src/kcm/FringeShiftKCM.ui](src/kcm/FringeShiftKCM.ui), README table row.
 - **When the effect runs at all** → `shouldRedirect()` / `updateWindows()`,
-  keeping the `m_windows`-non-empty-iff invariant above.
+  keeping the `m_windows` invariant above.
+- **Which windows it corrects** → `wantsCorrection()`. A property that can
+  change at run time also needs its change signal wired like
+  `windowFullScreenChanged` in `watchWindow()`.
+- **KWin's shader preprocessor changes** → [tests/kwinpreprocess.cpp](tests/kwinpreprocess.cpp)
+  and the shader's header comment, together.
 - **KWin version support** → `CMakeLists.txt` shims + `flake.nix` pin, together.

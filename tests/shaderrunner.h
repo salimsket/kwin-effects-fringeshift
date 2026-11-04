@@ -17,7 +17,18 @@
 namespace FringeShiftTest
 {
 
+/** This host has no usable GL: a reason to skip, not a fault in the shader. */
 class GlError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+/**
+ * The shader did not compile or link. Not a GlError on purpose: a GL setup
+ * failure is a skip, but this is a real failure on any host.
+ */
+class ShaderError : public std::runtime_error
 {
 public:
     using std::runtime_error::runtime_error;
@@ -67,10 +78,14 @@ struct Image
  * sampler/modulation uniforms) and nothing else; the KWin-only tail includes are
  * resolved against the identity stubs in tests/stubs.
  *
+ * The context is GLES 3 and the source goes through kwinPreprocessFragment(),
+ * so the driver compiles the same GLSL ES text that KWin gives it.
+ *
  * Parameters are uploaded through FringeShiftParams::upload(), so the uniform
  * names exercised here are literally the ones the compositor uses.
  *
- * Throws GlError if a context cannot be created or the shader fails to compile.
+ * Throws GlError if a context cannot be created, and ShaderError if the shader
+ * fails to compile or link.
  */
 class ShaderRunner
 {

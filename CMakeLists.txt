@@ -149,6 +149,11 @@ if(FRINGESHIFT_BUILD_TESTS)
 
     # Deliberately does NOT link KWin: the point of the harness is to exercise
     # the shipped shader with no compositor present.
+    # The copy of KWin's shader preprocessor. Both the harness and the dialect
+    # check below use it, so they agree on what KWin hands the driver.
+    add_library(fringeshift-kwinpreprocess STATIC tests/kwinpreprocess.cpp)
+    target_include_directories(fringeshift-kwinpreprocess PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
     add_executable(fringeshift-measure
         tests/shaderrunner.cpp
         tests/measure.cpp
@@ -156,14 +161,20 @@ if(FRINGESHIFT_BUILD_TESTS)
 
     target_link_libraries(fringeshift-measure PRIVATE
         fringeshiftparams
+        fringeshift-kwinpreprocess
         PkgConfig::Epoxy
         PkgConfig::EGL
     )
 
+    add_executable(fringeshift-preprocess tests/preprocess_main.cpp)
+    target_link_libraries(fringeshift-preprocess PRIVATE fringeshift-kwinpreprocess)
+
     # KDECompilerSettings builds KDE code with -fno-exceptions. The harness is
     # not loaded into the compositor, and reporting GL setup failure as an
     # exception keeps the measurement code free of error plumbing.
+    kde_target_enable_exceptions(fringeshift-kwinpreprocess PRIVATE)
     kde_target_enable_exceptions(fringeshift-measure PRIVATE)
+    kde_target_enable_exceptions(fringeshift-preprocess PRIVATE)
 
     enable_testing()
     # The configured copy, not the source: the source holds an @-placeholder
@@ -175,4 +186,35 @@ if(FRINGESHIFT_BUILD_TESTS)
     )
     # No headless GL driver on this host is a skip, not a shader failure.
     set_tests_properties(shader-measurements PROPERTIES SKIP_RETURN_CODE 77)
+
+    # The measurements above need identity stubs in place of KWin's
+    # colormanagement.glsl and saturation.glsl, so they cannot see a change in
+    # those files. This check compiles the shader against the real ones, in
+    # both dialects KWin can choose, with no GPU. Without it, a KWin release
+    # that changes encodingToNits() shows up only as a log line in a running
+    # session and an effect that does nothing.
+    #
+    # The directory is KWin's src/opengl from the KWin you build against. The
+    # flake supplies it from the pinned kdePackages.kwin.src.
+    find_program(GLSLANG_VALIDATOR glslangValidator)
+    set(FRINGESHIFT_KWIN_SHADER_DIR "$ENV{FRINGESHIFT_KWIN_SHADER_DIR}" CACHE PATH
+        "KWin's src/opengl directory, to check the shader against KWin's real includes")
+    if(GLSLANG_VALIDATOR AND EXISTS "${FRINGESHIFT_KWIN_SHADER_DIR}/colormanagement.glsl")
+        foreach(dialect es300 es100)
+            set(preprocessed ${CMAKE_CURRENT_BINARY_DIR}/shaders/kwin-${dialect}.frag)
+            add_test(NAME shader-kwin-${dialect}-preprocess
+                COMMAND fringeshift-preprocess
+                    ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift.frag
+                    ${FRINGESHIFT_KWIN_SHADER_DIR}
+                    ${dialect}
+                    ${preprocessed}
+            )
+            set_tests_properties(shader-kwin-${dialect}-preprocess PROPERTIES FIXTURES_SETUP kwin-${dialect})
+            add_test(NAME shader-kwin-${dialect}
+                COMMAND ${GLSLANG_VALIDATOR} -S frag ${preprocessed})
+            set_tests_properties(shader-kwin-${dialect} PROPERTIES FIXTURES_REQUIRED kwin-${dialect})
+        endforeach()
+    else()
+        message(STATUS "Not checking the shader against KWin's includes: needs glslangValidator and FRINGESHIFT_KWIN_SHADER_DIR")
+    endif()
 endif()

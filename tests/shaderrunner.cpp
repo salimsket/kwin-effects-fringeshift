@@ -6,8 +6,6 @@
 
 #include "shaderrunner.h"
 
-#include <fstream>
-#include <sstream>
 #include <string_view>
 
 #include <epoxy/egl.h>
@@ -16,6 +14,8 @@
 #ifndef EGL_PLATFORM_SURFACELESS_MESA
 #define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
 #endif
+
+#include "kwinpreprocess.h"
 
 namespace FringeShiftTest
 {
@@ -26,7 +26,7 @@ namespace
 // Passthrough covering the viewport with a single oversized triangle, so the
 // runner needs no vertex buffers at all. texcoord0 is the name fringeshift.frag
 // expects from KWin's vertex stage.
-constexpr const char *vertexSource = R"(#version 140
+constexpr const char *vertexSource = R"(#version 300 es
 out vec2 texcoord0;
 void main()
 {
@@ -35,49 +35,6 @@ void main()
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }
 )";
-
-std::string readFile(const std::filesystem::path &path)
-{
-    std::ifstream in{path};
-    if (!in) {
-        throw GlError("cannot open " + path.string());
-    }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    return buffer.str();
-}
-
-/**
- * Resolves `#include "name"` one level deep against @a includeDir.
- *
- * GLSL has no #include; in production KWin's shader preprocessor resolves these
- * against its own compiled-in resources. That is the one piece of KWin the
- * harness has to stand in for, and it is why tests/stubs exists.
- */
-std::string readWithIncludes(const std::filesystem::path &path, const std::filesystem::path &includeDir)
-{
-    std::istringstream source{readFile(path)};
-    std::ostringstream out;
-
-    for (std::string line; std::getline(source, line);) {
-        const std::string_view view{line};
-        const auto directive = view.find("#include");
-        if (directive == std::string_view::npos) {
-            out << line << '\n';
-            continue;
-        }
-        const auto open = view.find('"', directive);
-        const auto close = open == std::string_view::npos ? std::string_view::npos : view.find('"', open + 1);
-        if (open == std::string_view::npos || close == std::string_view::npos) {
-            out << line << '\n';
-            continue;
-        }
-        const std::string name{view.substr(open + 1, close - open - 1)};
-        out << "// " << line << " (resolved by the harness)\n";
-        out << readFile(includeDir / name) << '\n';
-    }
-    return out.str();
-}
 
 GLuint compile(GLenum stage, const std::string &source, const char *label)
 {
@@ -94,7 +51,7 @@ GLuint compile(GLenum stage, const std::string &source, const char *label)
         std::string log(std::size_t(length > 0 ? length : 1), '\0');
         glGetShaderInfoLog(shader, length, nullptr, log.data());
         glDeleteShader(shader);
-        throw GlError(std::string{label} + " failed to compile:\n" + log);
+        throw ShaderError(std::string{label} + " failed to compile:\n" + log);
     }
     return shader;
 }
@@ -182,31 +139,32 @@ ShaderRunner::ShaderRunner(const std::filesystem::path &fragmentPath, const std:
     if (!eglInitialize(d->display, nullptr, nullptr)) {
         throw GlError("eglInitialize failed");
     }
-    if (!eglBindAPI(EGL_OPENGL_API)) {
-        throw GlError("this EGL has no desktop OpenGL");
+    // GLES, because that is all KWin 6.8 uses: it binds EGL_OPENGL_ES_API and
+    // compiles every shader as GLSL ES. A desktop GL context would accept
+    // shader code that the compositor rejects.
+    if (!eglBindAPI(EGL_OPENGL_ES_API)) {
+        throw GlError("this EGL has no OpenGL ES");
     }
 
     const EGLint configAttributes[] = {
         EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_NONE};
     EGLConfig config = nullptr;
     EGLint configCount = 0;
     if (!eglChooseConfig(d->display, configAttributes, &config, 1, &configCount) || configCount == 0) {
-        throw GlError("no EGL config with desktop OpenGL support");
+        throw GlError("no EGL config with OpenGL ES 3 support");
     }
 
-    // 3.3 core: the newest profile that is certain to accept the shader's
-    // "#version 140", which is the spelling KWin itself compiles on a core
-    // context. Requesting less risks a driver defaulting to a 2.x context.
+    // GLES 3: the context on which KWin uses its "#version 300 es" prologue,
+    // which is the path every desktop GPU takes.
     const EGLint contextAttributes[] = {
         EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        EGL_CONTEXT_MINOR_VERSION, 0,
         EGL_NONE};
     d->context = eglCreateContext(d->display, config, EGL_NO_CONTEXT, contextAttributes);
     if (d->context == EGL_NO_CONTEXT) {
-        throw GlError("could not create an OpenGL 3.3 core context");
+        throw GlError("could not create an OpenGL ES 3.0 context");
     }
     // Surfaceless: everything is rendered into an FBO, so there is no drawable.
     if (!eglMakeCurrent(d->display, EGL_NO_SURFACE, EGL_NO_SURFACE, d->context)) {
@@ -214,12 +172,20 @@ ShaderRunner::ShaderRunner(const std::filesystem::path &fragmentPath, const std:
     }
 
     const GLuint vertex = compile(GL_VERTEX_SHADER, vertexSource, "harness vertex shader");
-    const GLuint fragment = compile(GL_FRAGMENT_SHADER, readWithIncludes(fragmentPath, includeDir), "fringeshift.frag");
+    // The source exactly as KWin would hand it to the driver, with the stubs in
+    // place of KWin's own includes.
+    std::string fragmentSource;
+    try {
+        fragmentSource = kwinPreprocessFragment(fragmentPath, includeDir, GlslDialect::Es300);
+    } catch (const std::runtime_error &error) {
+        throw ShaderError(error.what());
+    }
+    const GLuint fragment = compile(GL_FRAGMENT_SHADER, fragmentSource, "fringeshift.frag");
 
+    // fragColor is the only output, so GLSL ES puts it at location 0.
     d->program = glCreateProgram();
     glAttachShader(d->program, vertex);
     glAttachShader(d->program, fragment);
-    glBindFragDataLocation(d->program, 0, "fragColor");
     glLinkProgram(d->program);
     glDeleteShader(vertex);
     glDeleteShader(fragment);
@@ -231,11 +197,12 @@ ShaderRunner::ShaderRunner(const std::filesystem::path &fragmentPath, const std:
         glGetProgramiv(d->program, GL_INFO_LOG_LENGTH, &length);
         std::string log(std::size_t(length > 0 ? length : 1), '\0');
         glGetProgramInfoLog(d->program, length, nullptr, log.data());
-        throw GlError("link failed:\n" + log);
+        throw ShaderError("link failed:\n" + log);
     }
 
-    // Core profile draws nothing without a bound vertex array, even when the
-    // vertex shader reads no attributes.
+    // A bound vertex array, although the vertex shader reads no attributes.
+    // GLES 3 does not need one; a core-profile desktop driver draws nothing
+    // without one, and it costs nothing here.
     glGenVertexArrays(1, &d->vertexArray);
 }
 

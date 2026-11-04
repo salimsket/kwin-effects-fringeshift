@@ -38,6 +38,10 @@ FringeShiftEffect::FringeShiftEffect()
 
     connect(effects, &EffectsHandler::windowAdded, this, &FringeShiftEffect::slotWindowAdded);
     connect(effects, &EffectsHandler::windowDeleted, this, &FringeShiftEffect::slotWindowDeleted);
+    const auto windows = effects->stackingOrder();
+    for (EffectWindow *w : windows) {
+        watchWindow(w);
+    }
 
     readConfig();
     if (loadShader()) {
@@ -62,6 +66,11 @@ bool FringeShiftEffect::shouldRedirect() const
     // Redirecting a window costs an offscreen pass per frame, so drop out
     // entirely when the parameters would not change a single pixel.
     return m_shader && m_enabled && !m_params.isIdentity();
+}
+
+bool FringeShiftEffect::wantsCorrection(const EffectWindow *w)
+{
+    return !w->isFullScreen();
 }
 
 bool FringeShiftEffect::loadShader()
@@ -107,6 +116,14 @@ void FringeShiftEffect::redirectWindow(EffectWindow *w)
     m_windows.insert(w);
 }
 
+void FringeShiftEffect::unredirectWindow(EffectWindow *w)
+{
+    if (m_windows.erase(w) == 0) {
+        return;
+    }
+    unredirect(w);
+}
+
 void FringeShiftEffect::unredirectAll()
 {
     for (EffectWindow *w : m_windows) {
@@ -115,12 +132,22 @@ void FringeShiftEffect::unredirectAll()
     m_windows.clear();
 }
 
+void FringeShiftEffect::syncWindow(EffectWindow *w)
+{
+    // Can unredirect, so the caller makes sure a GL context is current.
+    if (shouldRedirect() && wantsCorrection(w)) {
+        redirectWindow(w);
+    } else {
+        unredirectWindow(w);
+    }
+}
+
 void FringeShiftEffect::updateWindows()
 {
     if (shouldRedirect()) {
         const auto windows = effects->stackingOrder();
         for (EffectWindow *w : windows) {
-            redirectWindow(w);
+            syncWindow(w);
         }
     } else {
         unredirectAll();
@@ -129,14 +156,45 @@ void FringeShiftEffect::updateWindows()
     effects->addRepaintFull();
 }
 
+void FringeShiftEffect::watchWindow(EffectWindow *w)
+{
+    // Every window, redirected or not: a window that leaves fullscreen has to
+    // be found again, and the effect can be toggled on at any time.
+    connect(w, &EffectWindow::windowFullScreenChanged, this, &FringeShiftEffect::slotWindowFullScreenChanged,
+            Qt::UniqueConnection);
+}
+
 void FringeShiftEffect::slotWindowAdded(EffectWindow *w)
 {
+    watchWindow(w);
+
     // A new window arrives outside updateWindows(), so it has to re-check the
-    // same invariant for itself.
-    if (!shouldRedirect()) {
+    // same invariant for itself. A new window is never in m_windows, so this
+    // only ever redirects, and redirect() needs no GL context.
+    if (shouldRedirect() && wantsCorrection(w)) {
+        redirectWindow(w);
+    }
+}
+
+void FringeShiftEffect::slotWindowFullScreenChanged(EffectWindow *w)
+{
+    const bool wanted = shouldRedirect() && wantsCorrection(w);
+    if (wanted == m_windows.contains(w)) {
         return;
     }
-    redirectWindow(w);
+
+    // A window state change is not one of the places where KWin promises a
+    // current GL context, and unredirect() destroys the window's offscreen
+    // buffer. Same guard, and same reason, as toggle(). If it fails, the window
+    // stays redirected: it is still drawn correctly, only through the 8-bit
+    // sRGB buffer and without direct scanout.
+    if (!wanted && !effects->makeOpenGLContextCurrent()) {
+        qCWarning(KWIN_FRINGESHIFT) << "No current OpenGL context; leaving a fullscreen window redirected";
+        return;
+    }
+
+    syncWindow(w);
+    w->addRepaintFull();
 }
 
 void FringeShiftEffect::slotWindowDeleted(EffectWindow *w)

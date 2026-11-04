@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <string>
 
 #include <QCoreApplication>
@@ -29,6 +30,7 @@
 
 using FringeShiftTest::GlError;
 using FringeShiftTest::Image;
+using FringeShiftTest::ShaderError;
 using FringeShiftTest::ShaderRunner;
 using KWin::FringeShiftParams;
 
@@ -341,6 +343,11 @@ int main(int argc, char **argv)
         // which is a real failure and must not be buried under the skip.
         std::fprintf(stderr, "skipping shader measurements: %s\n", error.what());
         return failures == 0 ? 77 : 1;
+    } catch (const ShaderError &error) {
+        // The context exists, so the GL is usable: a shader that does not
+        // compile is a real failure on any host, never a skip.
+        std::fprintf(stderr, "shader rejected: %s\n", error.what());
+        return 1;
     }
 
     try {
@@ -600,6 +607,73 @@ int main(int argc, char **argv)
             check(untouched < 1e-5 && independent < 1e-5,
                   "separable-compensation",
                   format("vertical shift on x-grating", untouched) + "  " + format("y-component leak", independent));
+        }
+
+        // 11. A centred fraction of exactly half a texel puts the sample point
+        //     on a texel boundary, where the Laplacian centre is a tie. Either
+        //     neighbour is a valid answer, but it must be the same answer for
+        //     every window. The shader used to take floor() of the
+        //     interpolated position, so the tie went to whichever side the
+        //     interpolation error in texcoord0 fell on. That error depends on
+        //     the driver and the window size: on a desktop GPU a 256x256 window
+        //     went one way and an 800x600 window the other, which moved up to
+        //     0.8 of Laplacian between the two. The centre now comes from the
+        //     uniforms alone.
+        //
+        //     No reference is needed: the same content, seen through two
+        //     window sizes, must give the same pixels wherever the 5x5 window
+        //     does not reach an edge. One size is a power of two, where every
+        //     texel centre is exact in float; the other is not. A driver that
+        //     breaks the tie the same way at both sizes (llvmpipe does) passes
+        //     even the old form, so this check bites on a real GPU.
+        {
+            constexpr int largeSize = 256;
+            constexpr int smallWidth = 239;
+            constexpr int smallHeight = 233;
+            std::mt19937 random{1234};
+            std::uniform_real_distribution<float> level{0.2f, 0.8f};
+            // Opaque noise, so neighbouring Laplacians differ and premultiplying
+            // does not come into it.
+            Image large{largeSize, largeSize};
+            for (int y = 0; y < largeSize; ++y) {
+                for (int x = 0; x < largeSize; ++x) {
+                    for (int c = 0; c < 3; ++c) {
+                        large.at(x, y, c) = level(random);
+                    }
+                    large.at(x, y, 3) = 1.0f;
+                }
+            }
+            Image small{smallWidth, smallHeight};
+            for (int y = 0; y < smallHeight; ++y) {
+                for (int x = 0; x < smallWidth; ++x) {
+                    for (int c = 0; c < 4; ++c) {
+                        small.at(x, y, c) = large.at(x, y, c);
+                    }
+                }
+            }
+
+            // Red +1 alone centres to red +0.5, green and blue -0.5.
+            FringeShiftParams alongX;
+            alongX.shiftR = QVector2D(1.0f, 0.0f);
+            FringeShiftParams alongY;
+            alongY.shiftR = QVector2D(0.0f, 1.0f);
+
+            double worst = 0.0;
+            for (const FringeShiftParams &half : {alongX, alongY}) {
+                const FringeShiftParams params = FringeShiftParams::clamped(half);
+                const Image fromLarge = runner->run(large, params);
+                const Image fromSmall = runner->run(small, params);
+                for (int y = margin; y < smallHeight - margin; ++y) {
+                    for (int x = margin; x < smallWidth - margin; ++x) {
+                        for (int c = 0; c < 3; ++c) {
+                            worst = std::max(worst, std::abs(double(fromLarge.at(x, y, c)) - double(fromSmall.at(x, y, c))));
+                        }
+                    }
+                }
+            }
+            // Loose enough for the ~1e-5 resample difference that interpolation
+            // error makes between two sizes, far below a centre that moved.
+            check(worst < 1e-3, "half-texel-stable", format("max |delta| between window sizes", worst));
         }
     } catch (const GlError &error) {
         std::fprintf(stderr, "\nGL failure: %s\n", error.what());

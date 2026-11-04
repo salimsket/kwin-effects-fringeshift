@@ -1,10 +1,15 @@
 #version 140
 // Fringe Shift — per-channel 2D subpixel correction for QD-OLED.
 //
-// Written in core-profile spelling; KWin's shader preprocessor rewrites
-// in/out/texture() and substitutes its own #version line for legacy contexts,
-// so this one file covers both. Everything below therefore avoids GLSL 1.30+
-// built-ins (round(), integer clamp(), textureSize()).
+// KWin never compiles the #version line below. Its preprocessor
+// (GLShader::preprocess) deletes it and adds its own prologue. On a GLES 3
+// context that is "#version 300 es" plus highp defaults. On a GLES 2 context
+// there is no version line (GLSL ES 1.00), and the preprocessor also rewrites
+// in/out/texture(). The shader is therefore written in core spelling, but it
+// avoids everything that GLSL ES 1.00 does not have: round(), integer clamp(),
+// textureSize(), texelFetch(), and array indices that are not loop indices.
+// The GLES 2 rewrite works line by line: only the two declarations of
+// texcoord0 and fragColor can start with "in " or "out ".
 #include "colormanagement.glsl"
 #include "saturation.glsl"
 
@@ -27,84 +32,34 @@ out vec4 fragColor;
 
 vec2 g_texSize;
 
-// The offscreen texture holds premultiplied, sRGB-encoded window content, with
-// its y axis pointing up the screen (GLTexture::matrix() flips it when the quad
-// is drawn). Sampling is by explicit texel address so the resample is exact;
-// this clamp, like the texture's CLAMP_TO_EDGE, keeps taps inside the window.
+// The offscreen texture holds premultiplied, 8-bit, sRGB-encoded window
+// content: KWin's OffscreenEffect always renders it that way, whatever the
+// window's own colour description is. Which way its y axis points depends on
+// the KWin version (see axisFlip in main()). Sampling is by explicit texel
+// address so the resample is exact; this clamp, like the texture's
+// CLAMP_TO_EDGE, keeps taps inside the window.
 vec4 fetchTexel(vec2 texel)
 {
     vec2 c = clamp(texel, vec2(0.0), g_texSize - vec2(1.0));
     return texture(sampler, (c + vec2(0.5)) / g_texSize);
 }
 
-float fetchChannel(vec2 texel, int channel)
+// Resampling kernels, evaluated at the distance from a tap to the sample point,
+// one component per colour channel. Catmull-Rom (a = -0.5) keeps edge contrast
+// far better than bilinear, at the cost of very slight ring/overshoot on
+// extreme-contrast edges. It is zero from |x| = 2 on.
+vec3 catmullRom(vec3 x)
 {
-    vec4 t = fetchTexel(texel);
-    if (channel == 0) {
-        return t.r;
-    }
-    if (channel == 1) {
-        return t.g;
-    }
-    return t.b;
+    x = abs(x);
+    vec3 inner = (1.5 * x - 2.5) * x * x + 1.0;
+    vec3 outer = ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
+    return mix(inner, outer, step(1.0, x)) * (1.0 - step(2.0, x));
 }
 
-// Catmull-Rom cubic Hermite weights for the 4 taps at offsets -1, 0, 1, 2.
-vec4 cubicWeights(float t)
+// Fallback: the bilinear tent. Softer, with no risk of ringing at all.
+vec3 tent(vec3 x)
 {
-    float t2 = t * t;
-    float t3 = t2 * t;
-    return vec4(-0.5 * t3 +       t2 - 0.5 * t,
-                 1.5 * t3 - 2.5 * t2 + 1.0,
-                -1.5 * t3 + 2.0 * t2 + 0.5 * t,
-                 0.5 * t3 - 0.5 * t2);
-}
-
-// Sub-pixel shift via 4x4 Catmull-Rom: preserves edge contrast far better than
-// bilinear, at the cost of very slight ring/overshoot on extreme-contrast edges.
-float sampleBicubic(vec2 pos, int channel)
-{
-    vec2 tc = pos - vec2(0.5);
-    vec2 ip = floor(tc);
-    vec2 f = tc - ip;
-    vec4 wx = cubicWeights(f.x);
-    vec4 wy = cubicWeights(f.y);
-    float result = 0.0;
-    for (int j = 0; j < 4; ++j) {
-        float row = 0.0;
-        for (int i = 0; i < 4; ++i) {
-            row += wx[i] * fetchChannel(ip + vec2(float(i) - 1.0, float(j) - 1.0), channel);
-        }
-        result += wy[j] * row;
-    }
-    return result;
-}
-
-// Fallback: plain bilinear — softer, no ring risk at all.
-float sampleBilinear(vec2 pos, int channel)
-{
-    vec2 tc = pos - vec2(0.5);
-    vec2 ip = floor(tc);
-    vec2 f = tc - ip;
-    float c00 = fetchChannel(ip + vec2(0.0, 0.0), channel);
-    float c10 = fetchChannel(ip + vec2(1.0, 0.0), channel);
-    float c01 = fetchChannel(ip + vec2(0.0, 1.0), channel);
-    float c11 = fetchChannel(ip + vec2(1.0, 1.0), channel);
-    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-}
-
-// 5-tap Laplacian at a texel, kept SPLIT into its two axis components. The
-// same five taps as the summed form; separating them is what lets the MTF
-// compensation below be applied per axis, which is what a separable resample
-// actually needs.
-vec2 lapAxes(vec2 pos, int channel)
-{
-    vec2 p = floor(pos);
-    float c = fetchChannel(p, channel);
-    return vec2(fetchChannel(p + vec2(-1.0,  0.0), channel)
-              + fetchChannel(p + vec2( 1.0,  0.0), channel),
-                fetchChannel(p + vec2( 0.0, -1.0), channel)
-              + fetchChannel(p + vec2( 0.0,  1.0), channel)) - 2.0 * c;
+    return max(1.0 - abs(x), 0.0);
 }
 
 // Content-adaptive mask. It gates SHARPNESS only: the geometric shift is
@@ -153,6 +108,7 @@ void main()
 {
     g_texSize = vec2(float(textureWidth), float(textureHeight));
     vec2 pos = texcoord0 * g_texSize;
+    vec2 n = floor(pos);
 
     // The mask only gates Sharpness, so skip its 25 taps when Sharpness is 0.
     float mask = 1.0;
@@ -197,16 +153,17 @@ void main()
     sG += ctr;
     sB += ctr;
 
+    // From here on the three channels travel together, one per component:
+    // sx.r is red's x shift, sy.b is blue's y shift, and so on.
+    vec3 sx = vec3(sR.x, sG.x, sB.x);
+    vec3 sy = vec3(sR.y, sG.y, sB.y);
+
     // Every shift splits into an exact integer texel step plus a fraction in
     // [-0.5, 0.5]. The integer part is a plain texel offset: exact, free, no MTF
     // loss at any magnitude. Only the fraction is ever filtered, so only the
     // fraction feeds the compensation term below.
-    vec2 fR = sR - floor(sR + vec2(0.5));
-    vec2 fG = sG - floor(sG + vec2(0.5));
-    vec2 fB = sB - floor(sB + vec2(0.5));
-    vec2 pR = pos - sR;
-    vec2 pG = pos - sG;
-    vec2 pB = pos - sB;
+    vec3 fx = sx - floor(sx + 0.5);
+    vec3 fy = sy - floor(sy + 0.5);
 
     // One path for every shift magnitude: an interpolator, whose linear phase
     // gives true sub-pixel positioning, plus a Laplacian that flattens its MTF
@@ -230,30 +187,88 @@ void main()
     // ca was fitted on a 1D grating, where dot(f, f) degenerates to fy^2, so
     // that spurious term was never in the measurement it came from.
     //
-    // `amt` stays isotropic: equal in both components, dot() below reproduces
-    // the summed Laplacian exactly, so Sharpen behaves as it always did.
-    vec2 kR = min(ca * fR * fR, 0.35) + amt * 0.25;
-    vec2 kG = min(ca * fG * fG, 0.35) + amt * 0.25;
-    vec2 kB = min(ca * fB * fB, 0.35) + amt * 0.25;
+    // `amt` stays isotropic: equal in both axes, the two Laplacian components
+    // below sum to the ordinary 5-tap Laplacian, so Sharpen behaves as it
+    // always did.
+    vec3 kx = min(ca * fx * fx, 0.35) + amt * 0.25;
+    vec3 ky = min(ca * fy * fy, 0.35) + amt * 0.25;
 
-    float r = sharp ? sampleBicubic(pR, 0) : sampleBilinear(pR, 0);
-    float g = sharp ? sampleBicubic(pG, 1) : sampleBilinear(pG, 1);
-    float b = sharp ? sampleBicubic(pB, 2) : sampleBilinear(pB, 2);
+    // ONE 5x5 WINDOW SERVES ALL THREE CHANNELS. KWin draws the offscreen
+    // texture 1:1 at a whole-pixel position, so `pos` sits on the centre of
+    // texel n = floor(pos), and a channel shifted by s samples at n + 0.5 - s.
+    // The tap at offset o from n is therefore o + s away from the sample point,
+    // whatever the pixel: the weights depend only on the uniforms. The bound:
+    // FringeShiftParams clamps every shift to +/-1 px, so after the centring
+    // above |s| <= 1. Catmull-Rom is zero from distance 2 on, so no tap outside
+    // o = -2 .. 2 has a weight. Each channel's Laplacian sits on the texel
+    // nearest its sample point, n - round(s), and its taps reach one texel
+    // further: also inside -2 .. 2. So 25 fetches give every channel its
+    // resample and its Laplacian, and the centre tap gives alpha. Fetching per
+    // channel took 64.
+    //
+    // The Laplacian centre comes from the same round() as the fractions above,
+    // not from floor() of the interpolated sample position. At a fraction of
+    // exactly 0.5 that position sits on a texel boundary, and interpolation
+    // error in texcoord0 would pick the side pixel by pixel.
+    vec3 cx = -floor(sx + 0.5);
+    vec3 cy = -floor(sy + 0.5);
+
+    // Per x offset, one component per channel: the resample weight, the 1D
+    // Laplacian (1, -2, 1) about that channel's centre, and an indicator of
+    // the centre itself. The y versions are made per row in the loop below.
+    vec3 wX[5];
+    vec3 lapX[5];
+    vec3 ctrX[5];
+    for (int i = 0; i < 5; ++i) {
+        float o = float(i) - 2.0;
+        wX[i] = sharp ? catmullRom(o + sx) : tent(o + sx);
+        vec3 d = abs(o - cx);
+        ctrX[i] = 1.0 - step(0.5, d);
+        lapX[i] = step(0.5, d) - step(1.5, d) - 2.0 * ctrX[i];
+    }
+
+    // The 2D Laplacian is split into its axis components, because the
+    // compensation above is per axis: an x component taken along the centre
+    // row and a y component taken down the centre column.
+    vec3 res = vec3(0.0);
+    vec3 lapAlongX = vec3(0.0);
+    vec3 lapAlongY = vec3(0.0);
+    float a = 0.0;
+    for (int j = 0; j < 5; ++j) {
+        float o = float(j) - 2.0;
+        vec3 wY = sharp ? catmullRom(o + sy) : tent(o + sy);
+        vec3 d = abs(o - cy);
+        vec3 ctrY = 1.0 - step(0.5, d);
+        vec3 lapY = step(0.5, d) - step(1.5, d) - 2.0 * ctrY;
+
+        vec3 rowW = vec3(0.0);
+        vec3 rowLap = vec3(0.0);
+        vec3 rowCtr = vec3(0.0);
+        for (int i = 0; i < 5; ++i) {
+            vec4 t = fetchTexel(n + vec2(float(i) - 2.0, o));
+            rowW += wX[i] * t.rgb;
+            rowLap += lapX[i] * t.rgb;
+            rowCtr += ctrX[i] * t.rgb;
+            if (i == 2 && j == 2) {
+                a = t.a;
+            }
+        }
+        res += wY * rowW;
+        lapAlongX += ctrY * rowLap;
+        lapAlongY += lapY * rowCtr;
+    }
 
     // Alpha is never shifted: displacing the window's own coverage would fray
     // its rounded corners and its shadow. RGB stays premultiplied, so it clamps
     // to alpha rather than to 1.
-    float a = fetchTexel(floor(pos)).a;
-    r = clamp(r - dot(kR, lapAxes(pR, 0)), 0.0, a);
-    g = clamp(g - dot(kG, lapAxes(pG, 1)), 0.0, a);
-    b = clamp(b - dot(kB, lapAxes(pB, 2)), 0.0, a);
+    vec3 rgb = clamp(res - kx * lapAlongX - ky * lapAlongY, 0.0, a);
 
     // Same tail as KWin's base.frag, in the same order. The resample above
     // deliberately runs in the source encoding (roughly perceptual), not in
     // linear light: shifting in linear light re-weights the taps toward the
     // bright side of every edge, which is exactly the stroke-weight change this
     // effect must not introduce.
-    vec4 result = vec4(r, g, b, a);
+    vec4 result = vec4(rgb, a);
     result = encodingToNits(result, sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y);
     result.rgb = (colorimetryTransform * vec4(result.rgb, 1.0)).rgb;
     result = adjustSaturation(result);

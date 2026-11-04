@@ -45,8 +45,10 @@ concept UniformSink = requires(S &shader, const char *name, QVector2D vector, fl
 struct FringeShiftParams
 {
     /**
-     * Beyond +/-1 px the correction is no longer a fringe fix, and the shader's
-     * 4x4 Catmull-Rom footprint stops covering the taps a larger shift needs.
+     * Beyond +/-1 px the correction is no longer a fringe fix. The shader also
+     * depends on this bound: it reads one 5x5 texel window for all three
+     * channels, which holds every tap only while each centred shift is within
+     * +/-1 px. A larger shift loses taps without any error.
      */
     static constexpr float maxShift = 1.0f;
     static constexpr float maxSharpen = 1.5f;
@@ -72,7 +74,7 @@ struct FringeShiftParams
      * Non-finite input is replaced, not clamped: std::clamp is specified as
      * `v < lo ? lo : hi < v ? hi : v`, so a NaN compares false both ways and
      * passes straight through. One NaN uniform poisons every tap in the
-     * shader's 4x4 footprint and blanks the window, and Qt's double parser
+     * shader's 5x5 window and blanks the window, and Qt's double parser
      * accepts the literals "nan" and "inf" — so a typo in kwinrc is a real way
      * to reach here with one.
      */

@@ -73,20 +73,40 @@ public Q_SLOTS:
 private Q_SLOTS:
     void slotWindowAdded(KWin::EffectWindow *w);
     void slotWindowDeleted(KWin::EffectWindow *w);
+    void slotWindowFullScreenChanged(KWin::EffectWindow *w);
 
 private:
     void readConfig();
     bool loadShader();
     void uploadUniforms();
     void updateWindows();
+    void watchWindow(KWin::EffectWindow *w);
+    void syncWindow(KWin::EffectWindow *w);
     void redirectWindow(KWin::EffectWindow *w);
+    void unredirectWindow(KWin::EffectWindow *w);
     void unredirectAll();
 
     /**
-     * The invariant behind m_windows: it is non-empty exactly when this is true.
-     * Every path that can change the answer goes through updateWindows().
+     * The invariant behind m_windows: when this is false, m_windows is empty;
+     * when it is true, m_windows holds exactly the windows that
+     * wantsCorrection() accepts. Every path that can change the answer goes
+     * through updateWindows() or syncWindow(). The one exception is a window
+     * that went fullscreen when no GL context could be made current (see
+     * slotWindowFullScreenChanged()); the next updateWindows() repairs it.
      */
     bool shouldRedirect() const;
+
+    /**
+     * False for a fullscreen window, which is never redirected.
+     *
+     * OffscreenEffect renders a redirected window into an 8-bit sRGB buffer,
+     * whatever the window's own colour description is. That clips HDR and
+     * wide-gamut content to SDR sRGB. A redirected window also counts as having
+     * an effect, which stops KWin from putting it on a hardware plane (direct
+     * scanout). Fullscreen games and video are where both of those matter
+     * most, and they are not the text this effect is for.
+     */
+    static bool wantsCorrection(const KWin::EffectWindow *w);
 
     FringeShiftParams m_params;
 

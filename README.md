@@ -202,16 +202,26 @@ they are written the way they are is
 
 ## Known limits
 
-- Every window pays one offscreen pass per frame while the effect is enabled.
+- Every non-fullscreen window pays one offscreen pass per frame while the
+  effect is enabled.
+- A corrected window goes through `OffscreenEffect`'s 8-bit sRGB buffer,
+  whatever its own colour description is. With HDR on, HDR and wide-gamut
+  content in a corrected window is clipped to SDR sRGB.
+- **Fullscreen windows are not corrected**, on purpose. A redirected window
+  counts as having an effect, so KWin cannot give it direct scanout, and its
+  HDR is lost to the buffer above. Fullscreen games and video are where both
+  matter, and they are not the text this effect is for. A window leaves the
+  correction when it goes fullscreen and comes back when it leaves fullscreen.
+  A borderless window that only *covers* the screen is not fullscreen, and
+  stays corrected.
 - Alpha is not shifted, so window shadows and rounded corners stay intact; the
   premultiplied RGB near an alpha edge is filtered along with the colour.
 - Shifts are in physical pixels and correct on HiDPI, but they assume the panel
   is in its native orientation — a rotated output has a rotated triad, which
   this does not model.
-- Nothing outside the compositor is corrected. `OffscreenEffect` deliberately
-  does not block direct scanout, so a fullscreen client that KWin hands straight
-  to the display controller is shown uncorrected — the same honest limit the
-  Windows version has with fullscreen-exclusive apps.
+- Nothing outside the compositor is corrected, e.g. a client that KWin hands
+  straight to the display controller — the same honest limit the Windows
+  version has with fullscreen-exclusive apps.
 - A configured shift is a nominal, not a delivered, displacement — see
   [gain](#nominal-versus-delivered-shift).
 
@@ -295,6 +305,10 @@ reading a preset, not a non-linearity.
   applied **per axis** — the resample is separable, so a horizontal fraction
   costs MTF horizontally and nothing more, and a purely vertical correction
   must leave horizontal detail untouched;
+- one 5×5 texel window feeds all three channels' resamples and Laplacians:
+  25 texture fetches per pixel. Fetching per channel took 64. The bound holds
+  because every shift is clamped to ±1 px, so each centred shift is within
+  ±1 px too;
 - resampling happens in the source encoding, not linear light — in linear light
   the taps re-weight toward the bright side of every edge, which is exactly the
   stroke-weight change this effect must avoid.
@@ -341,9 +355,13 @@ fringe below them must get smaller.
 
 The numbers above are reproducible. `tests/` builds `fringeshift-measure`, which
 compiles the shipped [fringeshift.frag](src/shaders/fringeshift.frag) (the copy
-that CMake configured for your KWin version) against a
-surfaceless EGL context, runs synthetic patterns through it, and measures the
-result — no compositor, no GPU, no window on screen.
+that CMake configured for your KWin version) on a surfaceless OpenGL ES 3
+context, runs synthetic patterns through it, and measures the result — no
+compositor, no GPU, no window on screen. KWin 6.8 runs on OpenGL ES only, so the
+harness does the same, and it passes the shader through a copy of KWin's own
+shader preprocessor ([tests/kwinpreprocess.cpp](tests/kwinpreprocess.cpp)). The
+driver therefore compiles the same GLSL ES text that KWin gives it. A shader that
+does not compile is a failure, never a skip.
 
 ```sh
 cmake --build build && ctest --test-dir build --output-on-failure
@@ -359,18 +377,27 @@ identity stubs in [tests/stubs/](tests/stubs/). That is faithful to what is
 under test: the resample deliberately happens in the source encoding, *before*
 that tail runs.
 
+The stubs cannot see a change in KWin's real include files, so two more tests,
+`shader-kwin-es300` and `shader-kwin-es100`, compile the shader against them
+with `glslangValidator`. They cover both prologues KWin can choose: GLSL ES 3.00
+on a GLES 3 context, and GLSL ES 1.00 on GLES 2. They need no GPU. The flake
+takes the include files from the source of the pinned `kdePackages.kwin`, and
+the dev shell sets `FRINGESHIFT_KWIN_SHADER_DIR` for them. Without that variable
+or `glslangValidator`, CMake prints a note and leaves the two tests out.
+
 | Check | What it pins down |
 | --- | --- |
 | `identity` | an all-zero set is a true no-op, so unredirecting costs nothing |
 | `alpha-untouched` | alpha is never resampled, so shadows and corners stay intact |
 | `dc-transfer` | mean is preserved exactly — the stroke-weight argument |
-| `mtf-at-f0.25` | the Laplacian term flattens the MTF; measured 1.0319 |
+| `mtf-at-f0.25` | the Laplacian term flattens the MTF; measured 1.0416 |
 | `chromatic-match` | all three channels move the same distance, green opposed |
 | `shift-gain` | how much of the nominal shift arrives, per frequency |
 | `proportional-shift` | a smooth sub-pixel continuum, with no floor |
 | `translation-invariant` | a shift common to all channels changes nothing |
 | `integer-step-exact` | a whole-texel step costs no MTF at all |
 | `separable-compensation` | a vertical correction leaves horizontal detail alone |
+| `half-texel-stable` | at an exact half-texel fraction, the result does not depend on window size |
 
 > [!NOTE]
 > Direction is deliberately out of scope: the harness cannot see the axis flip
