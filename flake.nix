@@ -7,7 +7,7 @@
     # plugin. Effect plugins are NOT binary compatible across KWin releases, so
     # bump this together with the system — `nixos-version --json` prints the
     # revision, and `nix flake update` alone will silently break the plugin.
-    nixpkgs.url = "github:NixOS/nixpkgs/04607e1165ac22c5fde6dcc54c9e0b3c0487c555";
+    nixpkgs.url = "github:NixOS/nixpkgs/0bb2eedc20e4739f29e8045034f2828ad7054f8f";
   };
 
   outputs = { self, nixpkgs }:

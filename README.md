@@ -31,11 +31,12 @@ releases, so a plugin built against 6.5 will not load into 6.6. Check yours with
 | extra-cmake-modules (ECM) | 6.0 | 6.26.0 |
 | Qt 6 | 6.6 (Plasma 6 floor) | 6.11.1 — Core, DBus, Gui, Widgets |
 | KDE Frameworks 6 | 6.0 | 6.26.0 — Config, ConfigWidgets, CoreAddons, GlobalAccel, I18n, KCMUtils, WidgetsAddons |
-| KWin | Plasma 6 | **6.6.6** — dev package, provides `KWinConfig.cmake` + `effect/*.h` |
+| KWin | Plasma 6 | **6.6.6**, **6.8.2** — dev package, provides `KWinConfig.cmake` + `effect/*.h` |
 | libepoxy + EGL | any | tests only; skip with `-DFRINGESHIFT_BUILD_TESTS=OFF` |
 
-Both KWin ≤ 6.6 and 6.7+ are handled — the build detects `KWin_VERSION` and
-switches two API shims.
+KWin ≤ 6.6, 6.7 and 6.8+ are handled — the build detects `KWin_VERSION` and
+switches four version shims. Two of them are new in 6.8: `drawWindow()`
+returns `bool`, and the offscreen texture's y axis points the other way.
 
 **Arch / CachyOS / EndeavourOS** (kwin ships its own headers, no `-devel` split):
 
@@ -123,6 +124,19 @@ with `sudo cmake --install build --prefix /usr`.
 > Rebuild after every Plasma update. An effect plugin is **not** binary
 > compatible across KWin releases; a stale one silently fails to load and the
 > effect vanishes from the list.
+
+To see whether KWin loaded the plugin:
+
+```sh
+qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.isEffectSupported fringeshift   # true
+journalctl --user -b | grep -i "fringeshift.*different version"                    # no output
+```
+
+A plugin built for a different KWin logs `Effect "fringeshift" was built for a
+different version of KWin and needs to be rebuilt`. KWin then marks the effect
+unsupported, and System Settings hides it. KWin uses the first copy it finds on
+`QT_PLUGIN_PATH`. Thus a stale copy earlier on the path (for example in
+`~/.nix-profile`) hides a correct copy later on the path.
 
 ### With Nix (optional)
 
@@ -285,10 +299,49 @@ reading a preset, not a non-linearity.
   the taps re-weight toward the bright side of every edge, which is exactly the
   stroke-weight change this effect must avoid.
 
+## KWin version differences
+
+The build reads `KWin_VERSION` and selects four shims:
+
+| KWin | Change | Shim |
+| --- | --- | --- |
+| 6.7 | `GLShader::isValid()` removed; the loader returns null on failure | `FRINGESHIFT_GLSHADER_HAS_ISVALID` (≤ 6.6) |
+| 6.7 | No `_core` rewrite of shader paths on a core-profile context | shader installed as both `fringeshift.frag` and `fringeshift_core.frag` |
+| 6.8 | `Effect::drawWindow()` returns `[[nodiscard]] bool`; `OffscreenEffect` returns `false` when it cannot get a buffer | `FRINGESHIFT_DRAWWINDOW_RETURNS_BOOL` |
+| 6.8 | The offscreen texture's y axis points down the screen | `@FRINGESHIFT_AXIS_FLIP_Y@` in the shader |
+
+The 6.8 axis change comes from how `OffscreenEffect`
+(`src/effect/offscreeneffect.cpp` in KWin) makes the window texture:
+
+| | KWin 6.6 / 6.7 | KWin 6.8 |
+| --- | --- | --- |
+| Offscreen buffer | `GLTexture::allocate(GL_RGBA8, size)` + `GLFramebuffer` | `EglSwapchain` (dmabuf, `DRM_FORMAT_ARGB8888`) |
+| Texture class | `GLTexture` | `EGLImageTexture` (from `importDmaBufAsTexture`) |
+| Content transform | `OutputTransform{}` (identity) | `OutputTransform::FlipY` |
+| `texcoord0` y in the shader | points **up** the screen | points **down** the screen |
+
+The evidence in the KWin source:
+
+- 6.6 `src/opengl/gltexture.cpp`, `GLTexture::allocate()`:
+  `new GLTexture(..., OutputTransform{})`.
+- 6.8 `src/opengl/eglimagetexture.cpp`: `GLTexture(target, textureId,
+  internalFormat, size, 1, true, OutputTransform::FlipY)`.
+- `RenderTarget` takes its transform from the colour attachment's
+  `contentTransform()`. Thus 6.8 draws the window into the buffer flipped, and
+  `texture()->matrix(NormalizedCoordinates)` flips the texture coordinates
+  back.
+
+With the 6.7 flip on 6.8, every vertical shift goes the wrong way. Green moves
+up, red and blue move down, and the fringe gets larger. No test can see this
+(see the note below), so check the direction by eye after a KWin update: with
+the effect on (**Meta+Ctrl+F9**), the green halo above edges and the warm
+fringe below them must get smaller.
+
 ## Measuring it
 
 The numbers above are reproducible. `tests/` builds `fringeshift-measure`, which
-compiles the shipped [fringeshift.frag](src/shaders/fringeshift.frag) against a
+compiles the shipped [fringeshift.frag](src/shaders/fringeshift.frag) (the copy
+that CMake configured for your KWin version) against a
 surfaceless EGL context, runs synthetic patterns through it, and measures the
 result — no compositor, no GPU, no window on screen.
 
@@ -323,7 +376,10 @@ that tail runs.
 > Direction is deliberately out of scope: the harness cannot see the axis flip
 > KWin applies through `GLTexture::matrix()`, so every assertion is a magnitude
 > or a relative channel direction. That `+GreenY` moves green *down the screen*
-> remains a claim only a real session can confirm.
+> remains a claim only a real session can confirm. This direction also depends
+> on the KWin version: KWin 6.8 changed the offscreen texture to a `FlipY`
+> content transform, so the build sets the shader's y flip from `KWin_VERSION`.
+> A wrong flip passes every check here and makes the fringe larger on screen.
 
 ## Why the settings page will not turn sub-pixel rendering off for you
 

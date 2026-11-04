@@ -236,8 +236,8 @@ those tail includes resolve. Changing the tail means changing the traits to matc
 
 ## Build
 
-CMake + ECM, `kcoreaddons_add_plugin` into `kwin/effects/plugins`. Two version
-shims, both keyed off `KWin_VERSION`:
+CMake + ECM, `kcoreaddons_add_plugin` into `kwin/effects/plugins`. Four version
+shims, all keyed off `KWin_VERSION`:
 
 - **`FRINGESHIFT_GLSHADER_HAS_ISVALID`** — KWin ≤ 6.6 has `GLShader::isValid()`;
   6.7 dropped it and signals failure with a null return instead.
@@ -245,17 +245,31 @@ shims, both keyed off `KWin_VERSION`:
   variant on a core-profile context; 6.7 loads the path verbatim. The one authored
   shader is `configure_file`d under both names into a generated `.qrc` so either
   resolver finds it.
+- **`FRINGESHIFT_DRAWWINDOW_RETURNS_BOOL`** — KWin 6.8 made `Effect::drawWindow()`
+  return `bool` (`[[nodiscard]]`); `OffscreenEffect` returns `false` when it
+  cannot get a buffer. The header picks `DrawWindowResult` from the define, and
+  the one body `return`s the base call in both cases — a `return` of a `void`
+  expression is legal C++, so the `.cpp` needs no `#ifdef`.
+- **`@FRINGESHIFT_AXIS_FLIP_Y@`** — the y factor of the shader's `axisFlip`.
+  KWin 6.8 backs the offscreen texture with an `EglSwapchain` buffer whose
+  `EGLImageTexture` carries `OutputTransform::FlipY`, so `texcoord0.y` points
+  *down* the screen (`1.0`); ≤ 6.7 it points up (`-1.0`). A compile define
+  cannot reach a Qt resource, so `configure_file` substitutes it (`@ONLY`, not
+  `COPYONLY`). The source `.frag` therefore does **not** compile as-is: the
+  harness and any manual compile must use `build/shaders/fringeshift.frag`.
+  The tests cannot see direction, so a wrong value here passes all of them —
+  only a real session catches it.
 
 Effect plugins are **not** binary compatible across KWin releases. `flake.nix`
 pins nixpkgs to the exact revision the host NixOS generation was built from so
 `kdePackages.kwin` here is bit-identical to the KWin that will load the plugin;
 `nix flake update` alone silently breaks the plugin. This machine currently
-resolves KWin **6.6.6** (`build/CMakeCache.txt` → `KWin_DIR`).
+resolves KWin **6.8.2** (nixpkgs `0bb2eed`; `build/CMakeCache.txt` → `KWin_DIR`).
 
 ## Testing
 
 `ctest --test-dir build` runs `fringeshift-measure`, which compiles the **shipped**
-`.frag` against a surfaceless EGL context and measures it. `nix build .#` runs it
+`.frag` — the configured copy in `build/shaders/`, not the source — against a surfaceless EGL context and measures it. `nix build .#` runs it
 too, on llvmpipe inside the sandbox. Exit 77 means no usable GL driver and is
 wired to CTest's `SKIP_RETURN_CODE`, so a driverless host skips rather than fails
 — but only if nothing has failed yet, because the four parameter-domain checks
@@ -289,7 +303,7 @@ Three things to know before touching the thresholds:
    to five digits — if either check moves, compute the expected value before
    assuming the harness is wrong.
 2. **Direction is out of scope.** The harness cannot reproduce KWin's axis flip
-   (`GLTexture::matrix()`), so every assertion is a magnitude or a *relative*
+   (`GLTexture::matrix()`, whose sign changed in 6.8 — see the build shims), so every assertion is a magnitude or a *relative*
    channel direction. `+GreenY` moving green down the screen is confirmable only
    in a real session.
 3. **Nearly everything here measures along y, on a y-varying grating.** That is

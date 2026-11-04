@@ -32,11 +32,24 @@ find_package(KWin REQUIRED)
 
 message(STATUS "Building against KWin ${KWin_VERSION}")
 
+# 6.8 backs the offscreen window texture with an EglSwapchain buffer, which
+# carries an OutputTransform::FlipY content transform. That makes texcoord0's
+# y axis point DOWN the screen; on 6.7 and older it points UP. The shader
+# multiplies every shift by (1, FRINGESHIFT_AXIS_FLIP_Y) to reach the UI
+# convention (+Y = down). The tests cannot see this direction, so a wrong value
+# here passes them and doubles the fringe on a real panel.
+if(KWin_VERSION VERSION_GREATER_EQUAL 6.8)
+    set(FRINGESHIFT_AXIS_FLIP_Y "1.0")
+else()
+    set(FRINGESHIFT_AXIS_FLIP_Y "-1.0")
+endif()
+
 # KWin <= 6.6 rewrites a shader path to its "_core" variant on a core-profile
 # context; 6.7 dropped that and loads the path verbatim. Ship the one authored
-# shader under both names so either resolver finds it.
-configure_file(src/shaders/fringeshift.frag ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift.frag COPYONLY)
-configure_file(src/shaders/fringeshift.frag ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift_core.frag COPYONLY)
+# shader under both names so either resolver finds it. @ONLY, not COPYONLY:
+# the axis flip above is substituted into it.
+configure_file(src/shaders/fringeshift.frag ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift.frag @ONLY)
+configure_file(src/shaders/fringeshift.frag ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift_core.frag @ONLY)
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/fringeshift.qrc
 "<!DOCTYPE RCC><RCC version=\"1.0\">
 <qresource prefix=\"/effects/fringeshift/\">
@@ -81,6 +94,12 @@ kcoreaddons_add_plugin(fringeshift
 # 6.7 replaced GLShader::isValid() with a nullptr return from the loader.
 if(KWin_VERSION VERSION_LESS 6.7)
     target_compile_definitions(fringeshift PRIVATE FRINGESHIFT_GLSHADER_HAS_ISVALID)
+endif()
+
+# 6.8 made Effect::drawWindow() return bool. OffscreenEffect returns false when
+# it cannot get an offscreen buffer, and the caller uses that value.
+if(KWin_VERSION VERSION_GREATER_EQUAL 6.8)
+    target_compile_definitions(fringeshift PRIVATE FRINGESHIFT_DRAWWINDOW_RETURNS_BOOL)
 endif()
 
 target_link_libraries(fringeshift PRIVATE
@@ -147,9 +166,11 @@ if(FRINGESHIFT_BUILD_TESTS)
     kde_target_enable_exceptions(fringeshift-measure PRIVATE)
 
     enable_testing()
+    # The configured copy, not the source: the source holds an @-placeholder
+    # that does not compile until configure_file() substitutes it.
     add_test(NAME shader-measurements
         COMMAND fringeshift-measure
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/fringeshift.frag
+            ${CMAKE_CURRENT_BINARY_DIR}/shaders/fringeshift.frag
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/stubs
     )
     # No headless GL driver on this host is a skip, not a shader failure.

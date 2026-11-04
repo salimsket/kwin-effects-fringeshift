@@ -164,19 +164,21 @@ void FringeShiftEffect::toggle()
     updateWindows();
 }
 
-void FringeShiftEffect::drawWindow(const RenderTarget &renderTarget, const RenderViewport &viewport,
+// Each branch returns the base call's result. On KWin 6.8+ that passes the bool
+// through to the caller; on older KWin it is a legal `return` of a void
+// expression, so one body serves both signatures.
+auto FringeShiftEffect::drawWindow(const RenderTarget &renderTarget, const RenderViewport &viewport,
                                    EffectWindow *window, int mask, const Region &deviceRegion,
-                                   WindowPaintData &data)
+                                   WindowPaintData &data) -> DrawWindowResult
 {
     if (mask & PAINT_WINDOW_TRANSFORMED) {
         // Effect::drawWindow() is the plain hand-off to the rest of the chain,
         // leaving the window redirected but not routing this frame through the
         // offscreen texture.
-        Effect::drawWindow(renderTarget, viewport, window, mask, deviceRegion, data);
-        return;
+        return Effect::drawWindow(renderTarget, viewport, window, mask, deviceRegion, data);
     }
 
-    OffscreenEffect::drawWindow(renderTarget, viewport, window, mask, deviceRegion, data);
+    return OffscreenEffect::drawWindow(renderTarget, viewport, window, mask, deviceRegion, data);
 }
 
 void FringeShiftEffect::reconfigure(ReconfigureFlags flags)

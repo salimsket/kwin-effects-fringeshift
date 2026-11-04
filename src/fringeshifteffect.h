@@ -57,8 +57,15 @@ protected:
      * degrades to nearest-neighbour and frays the rounded corners it exists to
      * protect. Neither view is one where sub-pixel fringing is visible anyway.
      */
-    void drawWindow(const RenderTarget &renderTarget, const RenderViewport &viewport, EffectWindow *window,
-                    int mask, const Region &deviceRegion, WindowPaintData &data) override;
+#ifdef FRINGESHIFT_DRAWWINDOW_RETURNS_BOOL
+    // KWin 6.8+: false means OffscreenEffect could not get a buffer.
+    using DrawWindowResult = bool;
+#else
+    using DrawWindowResult = void;
+#endif
+    DrawWindowResult drawWindow(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                                EffectWindow *window, int mask, const Region &deviceRegion,
+                                WindowPaintData &data) override;
 
 public Q_SLOTS:
     void toggle();

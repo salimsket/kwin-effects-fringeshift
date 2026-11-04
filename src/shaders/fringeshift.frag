@@ -173,8 +173,11 @@ void main()
     // conservation (text gains weight) and throws away most of the acuity gain
     // (+0.61% edge energy masked vs +1.75% uniform).
 
-    // texcoord0's y axis points up the screen; the UI convention is +Y = down.
-    const vec2 axisFlip = vec2(1.0, -1.0);
+    // Map the UI convention (+Y = down) onto texcoord0. CMake substitutes the
+    // y factor from the KWin version: -1.0 on KWin <= 6.7, where texcoord0's
+    // y axis points up the screen; 1.0 on 6.8+, where the offscreen texture's
+    // FlipY content transform makes it point down.
+    const vec2 axisFlip = vec2(1.0, @FRINGESHIFT_AXIS_FLIP_Y@);
     vec2 sR = shiftR * axisFlip;
     vec2 sG = shiftG * axisFlip;
     vec2 sB = shiftB * axisFlip;
