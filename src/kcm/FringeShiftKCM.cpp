@@ -68,28 +68,16 @@ bool subPixelRenderingIsOff()
  * Each is the `[Effect-fringeshift]` block of the same name in presets.conf.
  * That file is the reference archive and carries the derivation of every number
  * here; the .ui carries the one-line version as each button's tooltip. Nothing
- * reads presets.conf at runtime, so these are a second copy of five of its
- * blocks — the five that are worth one click.
+ * reads presets.conf at runtime, so these are a second copy of six of its
+ * blocks — the six that are worth one click.
  *
- * All five share `sharpen = 0`: the archive's argument is that the panel's
+ * All six share `sharpen = 0`: the archive's argument is that the panel's
  * apparent emitter is *larger* than the drawn one because light diffuses, and
  * that the extra low-pass is part of what makes the correction look right — so
  * sharpening fights the term that fixed it rather than recovering detail.
  */
 namespace presets
 {
-/** Lattice averaged over ~60 cells of a macro photograph. 0.437 / 0.449 px. */
-constexpr FringeShiftParams mpe{
-    .shiftR = {0.225f, -0.219f},
-    .shiftG = {0.0f, 0.219f},
-    .shiftB = {-0.225f, -0.219f},
-};
-/** The same panel from the scale drawing of one cell. 0.472 / 0.441 px. */
-constexpr FringeShiftParams spe{
-    .shiftR = {0.221f, -0.236f},
-    .shiftG = {0.069f, 0.236f},
-    .shiftB = {-0.221f, -0.236f},
-};
 /**
  * Read directly off a labelled reference diagram of the panel's subpixel
  * layout and confirmed by eye on live hardware with fringe-tune.
@@ -102,25 +90,41 @@ constexpr FringeShiftParams osorio{
     .shiftB = {-0.3000f, -0.3000f},
 };
 /**
- * OSORIO checked under a microscope: the emitter offsets measured on the
- * panel, relative to green red (-0.07, +0.49) and blue (+0.42, +0.49),
- * negated. With linearLight, so the light moves by exactly that much.
+ * OSORIO calibrated under a microscope: green against red/blue 0.65 px, the
+ * best value by eye in 3x3 grids over two sessions. X is OSORIO's.
  *
  * Identical to the schema's defaults, deliberately: this IS the current
  * default, and the button exists so the dialog states which reading it is
  * where "Defaults" cannot.
  */
 constexpr FringeShiftParams osorio321urx{
+    .shiftR = {0.2000f, -0.2167f},
+    .shiftG = {0.0500f, 0.4333f},
+    .shiftB = {-0.3000f, -0.2167f},
+};
+/** OSORIO-321URX rounded up to clean values: 0.70 px. */
+constexpr FringeShiftParams up{
+    .shiftR = {0.2000f, -0.2500f},
+    .shiftG = {0.0500f, 0.4500f},
+    .shiftB = {-0.3000f, -0.2500f},
+};
+/** Calibration session 1 (low brightness, white on black): 0.60 px. */
+constexpr FringeShiftParams night{
+    .shiftR = {0.2000f, -0.2000f},
+    .shiftG = {0.0500f, 0.4000f},
+    .shiftB = {-0.3000f, -0.2000f},
+};
+/** Microscope emitter offsets used directly: red (-0.07, +0.49), blue (+0.42, +0.49) from green, negated. */
+constexpr FringeShiftParams geo{
     .shiftR = {0.2000f, -0.2900f},
     .shiftG = {0.1300f, 0.2000f},
     .shiftB = {-0.2900f, -0.2900f},
-    .linearLight = true,
 };
-/** Vertical only, ~0.3x the measured geometry: the floor of the useful range. */
-constexpr FringeShiftParams triad{
-    .shiftR = {0.0f, -0.05f},
-    .shiftG = {0.0f, 0.10f},
-    .shiftB = {0.0f, -0.05f},
+/** Screenshot light model: light of a black/white edge moves 0.49 px at 0.79 px. */
+constexpr FringeShiftParams strong{
+    .shiftR = {0.2000f, -0.2633f},
+    .shiftG = {0.0500f, 0.5267f},
+    .shiftB = {-0.3000f, -0.2633f},
 };
 } // namespace presets
 } // namespace
@@ -187,19 +191,14 @@ FringeShiftKCM::FringeShiftKCM(QObject *parent, const KPluginMetaData &data)
         slider->setTickInterval(sliderScale / 4);
     }
 
-    // Linear light ignores Bicubic, so the page shows that. The box stays bound
-    // and keeps its value, so turning linear light off brings it back as it was.
-    connect(m_ui->kcfg_LinearLight, &QCheckBox::toggled, m_ui->kcfg_Bicubic, [this](bool linear) {
-        m_ui->kcfg_Bicubic->setEnabled(!linear);
-    });
-
     // After pairSlider, so a preset's spin-box writes reach the sliders the same
     // way a load does.
-    connectPreset(m_ui->presetMpeButton, presets::mpe);
-    connectPreset(m_ui->presetSpeButton, presets::spe);
-    connectPreset(m_ui->presetOsorioButton, presets::osorio);
     connectPreset(m_ui->presetOsorio321urxButton, presets::osorio321urx);
-    connectPreset(m_ui->presetTriadButton, presets::triad);
+    connectPreset(m_ui->presetUpButton, presets::up);
+    connectPreset(m_ui->presetNightButton, presets::night);
+    connectPreset(m_ui->presetGeoButton, presets::geo);
+    connectPreset(m_ui->presetMaxButton, presets::strong);
+    connectPreset(m_ui->presetOsorioButton, presets::osorio);
 
     // After the pairing, so the manager's initial load reaches the sliders through
     // the spin boxes' valueChanged.
@@ -256,7 +255,6 @@ void FringeShiftKCM::applyPreset(const FringeShiftParams &params)
     m_ui->kcfg_BlueY->setValue(params.shiftB.y());
     m_ui->kcfg_Sharpen->setValue(params.sharpen);
     m_ui->kcfg_Bicubic->setChecked(params.bicubic);
-    m_ui->kcfg_LinearLight->setChecked(params.linearLight);
     m_ui->kcfg_Adaptive->setChecked(params.adaptive);
 }
 

@@ -165,11 +165,11 @@ and spin box per channel axis, the sharpen amount, and the resample toggles.
 It writes the keys below and tells the compositor to re-read them, so Apply is
 enough.
 
-A row of preset buttons loads five archived parameter sets — **MPE** and **SPE**
-(two readings of the panel's emitter geometry), **Osorio** (a reference diagram,
-tuned by hand on live hardware), **OSORIO-321URX** (Osorio checked under a
-microscope, with `LinearLight`; what ships), and **Triad** (a conservative
-floor). A button only
+A row of preset buttons loads six parameter sets — **OSORIO-321URX** (Osorio
+calibrated under a microscope; what ships), four variants of it (**Up** 0.70,
+**Night** 0.60, **Geo** the raw emitter offsets, **Max** 0.79), and
+**Osorio** (a reference diagram, tuned by hand). MPE, SPE and Triad are in
+`presets.legacy.conf`. A button only
 fills the controls; Apply still commits and Reset still undoes.
 
 Same thing from the shell — `kwinrc`, group `[Effect-fringeshift]`, physical
@@ -187,12 +187,12 @@ busctl --user call org.kde.KWin /Effects org.kde.kwin.Effects reconfigureEffect 
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `RedX` / `RedY` | `0.200` / `-0.290` | red content shift, px |
-| `GreenX` / `GreenY` | `0.130` / `0.200` | green content shift, px |
-| `BlueX` / `BlueY` | `-0.290` / `-0.290` | blue content shift, px |
+| `RedX` / `RedY` | `0.200` / `-0.217` | red content shift, px |
+| `GreenX` / `GreenY` | `0.050` / `0.433` | green content shift, px |
+| `BlueX` / `BlueY` | `-0.300` / `-0.217` | blue content shift, px |
 | `Sharpen` | `0.0` | unsharp amount on top of the shift, 0 – 1.5 |
 | `Bicubic` | `true` | Catmull-Rom resample; `false` = bilinear (softer, no ringing) |
-| `LinearLight` | `true` | area resample in linear light: the light moves by exactly the shift, at any contrast. Overrides `Bicubic` — see [below](#nominal-versus-delivered-shift) |
+| `LinearLight` | `false` | experimental, no widget: area resample in linear light: the light moves by exactly the shift, at any contrast. Overrides `Bicubic` — see [below](#nominal-versus-delivered-shift) |
 | `Adaptive` | `true` | gate `Sharpen` to text-like pixels (never gates the shift) |
 | `ShowMask` | `false` | debug: render the text mask instead of the image |
 
@@ -200,10 +200,9 @@ Shifts are clamped to ±1 px. `ShowMask` is a debug flag with no widget on the
 settings page; set it by hand. With every shift at 0 and `Sharpen` at 0 the
 effect unredirects every window, so an all-zero configuration costs nothing.
 
-The defaults are the emitter offsets measured on the panel, negated: green
-0.49 px above the red/blue pair (the green/magenta fringe itself), red and
-blue 0.49 px apart horizontally (red on left edges, blue on right), and green
-0.07 px right of red. Where they come from is
+The defaults move green 0.65 px against the red/blue pair vertically (the
+green/magenta fringe itself), and red and blue 0.50 px apart horizontally
+(red on left edges, blue on right). Where they come from is
 [below](#where-the-default-numbers-come-from).
 
 ## Known limits
@@ -254,14 +253,17 @@ UI chrome included.
 
 ## Where the default numbers come from
 
-**OSORIO-321URX**, the default, is Osorio checked under a USB microscope. Solid
-red, green and blue frames, fitted over the whole emitter lattice in two
-sessions at different zoom, put red at (−0.07, +0.49) and blue at
-(+0.41 … +0.43, +0.49) px relative to green. The content shifts are those
-offsets negated. The vertical 0.49 confirms Osorio's 0.50. Horizontally the
-red–blue spacing agrees, and green sits 0.08 px further right than Osorio
-has it. With `LinearLight` on, the light moves by exactly these amounts, so
-the measured geometry is the setting; no tuning factor sits between them.
+**OSORIO-321URX**, the default, is Osorio calibrated under a USB microscope.
+The vertical separation was tuned by eye on raw emitter-level captures: 3×3
+grids of nine values, three narrowing rounds per session, no sharpening. Three
+sessions gave 0.60, 0.65 and 0.64 px; the default is 0.65. The horizontal
+values are Osorio's.
+
+The same microscope measured the emitters themselves: green sits 0.49 px
+above red/blue, which confirms Osorio's 0.50. The setting is larger than the
+offset because the resample moves code values, not light, and on hard
+black/white edges part of the shift is clipped — see
+[In light](#in-light).
 
 **Osorio**, the reading it refines, was read directly off a labelled reference
 diagram of this panel's subpixel layout — two sample points per emitter, so the repeating tile is visible, not
@@ -271,11 +273,10 @@ left gets a positive, i.e. opposite, correction), except `GreenX`, which the
 diagram places close enough to the R/B horizontal midpoint that live tuning,
 not the diagram, got the final sign.
 
-The values are written *uncentred* — `RedY`/`BlueY` −0.290 against `GreenY`
-0.200. The shader subtracts the midpoint of the smallest and largest of the
-three before resampling, so what reaches the resample is ±0.245 on every
-channel vertically and no channel carries a larger fraction; writing the same
-geometry pre-centred is bit-identical.
+The shader subtracts the midpoint of the smallest and largest of the three
+before resampling, so only the differences between channels matter. With the
+defaults, what reaches the resample is ±0.325 px on every channel vertically
+and no channel carries a larger fraction.
 
 `presets.conf` (`OSORIO-321URX`, `OSORIO`) carries the measurements, the diagram coordinates and the full
 derivation, plus twenty synthetic variants for by-eye comparison via
@@ -291,8 +292,8 @@ A configured shift is a **nominal**, not a delivered, displacement. Catmull-Rom
 is an interpolating kernel, not an ideal one, so its phase response
 under-delivers the requested offset by an amount that grows with frequency:
 measured 0.982 of nominal at f = 1/16 cyc/px and 0.735 at f = 0.25, the
-text-edge end. Ask for the default geometry's ±0.245 px of centred green on
-this path and roughly 0.180 px arrives where it matters most.
+text-edge end. Ask for the default's ±0.325 px of centred green and roughly
+0.239 px arrives where it matters most.
 
 Gain depends on the fraction as well as the frequency — the in-phase Laplacian
 term grows as its square and partly offsets the kernel's phase lag, so smaller
@@ -314,9 +315,9 @@ make less light move than the code values suggest:
 - The rest is weighted by code value, and code values near black carry almost
   no light.
 
-`linear-light-shift` measures it. With the default geometry (0.490 px between
-green and red/blue), this path moves the light 0.286 px on a black/white edge
-and 0.473 px on a 10 % / 90 % edge. So the same setting is a different correction
+`linear-light-shift` measures it. With the default (0.650 px between green
+and red/blue), this path moves the light 0.384 px on a black/white edge and
+0.555 px on a 10 % / 90 % edge. So the same setting is a different correction
 on different content. A microscope session on this panel showed it: the
 emitter offset is 0.49 px, but the best setting by eye was 0.60–0.65 on
 black text and lower on mid-contrast content.
@@ -327,14 +328,14 @@ compensation. This is the physical model of the panel: an emitter that sits a
 fraction `f` off the pixel centre collects `1 − f` of one pixel's light and
 `f` of its neighbour's. The weights are non-negative, so nothing overshoots.
 Each channel's light moves by exactly its shift, at any contrast, and its
-total light stays the same. With it on, set the shifts to the emitter
-geometry itself: the defaults are that geometry.
+total light stays the same. With it on, the shifts would be set to the
+emitter geometry itself (0.49 px vertically).
 
 The cost is the MTF compensation, which this path does not have. Fine detail
-along the shift axis gets the softness of the area resample. `LinearLight` is
-on by default. Turn it off to get the Catmull-Rom path and its compensation
-back; then a shift needs a larger setting than the geometry, by an amount
-that depends on the content.
+along the shift axis gets the softness of the area resample, and in light a
+blend into a dark stroke reads much brighter than in code values. On this
+panel that looked clearly blurry on text, with no visible gain. So
+`LinearLight` is off by default and kept only as an experiment.
 
 ## How it works
 
@@ -443,7 +444,7 @@ or `glslangValidator`, CMake prints a note and leaves the two tests out.
 | `identity` | an all-zero set is a true no-op, so unredirecting costs nothing |
 | `alpha-untouched` | alpha is never resampled, so shadows and corners stay intact |
 | `dc-transfer` | mean is preserved exactly — the stroke-weight argument |
-| `mtf-at-f0.25` | the Laplacian term flattens the MTF; measured 1.0416 |
+| `mtf-at-f0.25` | the resample does not soften; measured 1.081 (a slight overshoot at the default 0.325 px fraction) |
 | `chromatic-match` | all three channels move the same distance, green opposed |
 | `shift-gain` | how much of the nominal shift arrives, per frequency |
 | `proportional-shift` | a smooth sub-pixel continuum, with no floor |

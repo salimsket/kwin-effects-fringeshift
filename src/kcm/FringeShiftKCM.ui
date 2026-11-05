@@ -25,22 +25,52 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="presetMpeButton">
+      <widget class="QPushButton" name="presetOsorio321urxButton">
        <property name="text">
-        <string>MPE</string>
+        <string>OSORIO-321URX</string>
        </property>
        <property name="toolTip">
-        <string>Emitter lattice measured across ~60 cells of a macro photograph, so per-cell reading error averages out. Separations 0.437 px vertical, 0.449 px horizontal.</string>
+        <string>Osorio, calibrated under a microscope: green against red/blue 0.65 px, the best value by eye over two sessions. Horizontal as Osorio. What this effect ships with.</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="presetSpeButton">
+      <widget class="QPushButton" name="presetUpButton">
        <property name="text">
-        <string>SPE</string>
+        <string>321URX-Up</string>
        </property>
        <property name="toolTip">
-        <string>The same panel read from the scale drawing of one cell: 0.472 px vertical, 0.441 px horizontal.</string>
+        <string>OSORIO-321URX rounded up to clean values: green against red/blue 0.70 px.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetNightButton">
+       <property name="text">
+        <string>321URX-Night</string>
+       </property>
+       <property name="toolTip">
+        <string>The first calibration session, at low brightness with white text on black: 0.60 px.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetGeoButton">
+       <property name="text">
+        <string>321URX-Geo</string>
+       </property>
+       <property name="toolTip">
+        <string>The emitter offsets measured under the microscope, used directly: 0.49 px vertical, green 0.13 px right in X. Usually looks under-corrected.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="presetMaxButton">
+       <property name="text">
+        <string>321URX-Max</string>
+       </property>
+       <property name="toolTip">
+        <string>Computed from screenshots: the setting at which the light of pure black/white edges moves the full 0.49 px. 0.79 px. Strong; may over-correct grey text.</string>
        </property>
       </widget>
      </item>
@@ -51,26 +81,6 @@
        </property>
        <property name="toolTip">
         <string>Read off a reference diagram of the panel's subpixel layout and tuned by eye on live hardware. 0.500 px vertical, 0.500 px horizontal between red and blue. Code-value resample.</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="presetOsorio321urxButton">
-       <property name="text">
-        <string>OSORIO-321URX</string>
-       </property>
-       <property name="toolTip">
-        <string>Osorio, checked under a microscope: the emitter offsets measured on the panel itself (0.49 px vertical, 0.49 px between red and blue, green 0.07 px left of red), with Linear light on so the light moves by exactly that much. What this effect ships with.</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="presetTriadButton">
-       <property name="text">
-        <string>Triad</string>
-       </property>
-       <property name="toolTip">
-        <string>Vertical only, and roughly a third of the measured geometry: the floor of the useful range. Visible on a fringe test pattern, near invisible in normal use.</string>
        </property>
       </widget>
      </item>
@@ -414,16 +424,6 @@
          </property>
          <property name="toolTip">
           <string>Catmull-Rom resample. Unchecked falls back to bilinear: softer, but free of ringing.</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QCheckBox" name="kcfg_LinearLight">
-         <property name="text">
-          <string>Linear light</string>
-         </property>
-         <property name="toolTip">
-          <string>Shift the light, not the code values: an area resample in linear light. Each channel's light moves by exactly the shift you set, at any contrast. Replaces Bicubic.</string>
          </property>
         </widget>
        </item>

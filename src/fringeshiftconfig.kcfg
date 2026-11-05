@@ -8,14 +8,11 @@
         <!-- Per-channel content shift in physical pixels.
              +X moves that channel's content right, +Y moves it down.
 
-             OSORIO-321URX: OSORIO (read off a labelled reference diagram of
-             this panel's subpixel layout, then tuned by eye) checked under a
-             microscope. The emitter offsets measured on the panel, relative
-             to green, are red (-0.07, +0.49) and blue (+0.42, +0.49); the
-             content shifts below are those, negated. LinearLight is on, so
-             the light moves by exactly these amounts. See presets.conf's
-             OSORIO-321URX and OSORIO sections, and presets.legacy.conf for
-             older readings.
+             OSORIO-321URX: OSORIO calibrated under a microscope. The
+             vertical separation of green against red/blue is 0.65 px, the
+             best value by eye in 3x3 grids over two sessions (0.65 and
+             0.64). X is OSORIO's. See presets.conf's OSORIO-321URX and
+             OSORIO sections, and presets.legacy.conf for older readings.
 
              Not centred: the shader's own centring step (subtract the
              midpoint of the smallest and largest, per axis) handles that at
@@ -24,19 +21,19 @@
             <default>0.2000</default>
         </entry>
         <entry name="RedY" type="Double">
-            <default>-0.2900</default>
+            <default>-0.2167</default>
         </entry>
         <entry name="GreenX" type="Double">
-            <default>0.1300</default>
+            <default>0.0500</default>
         </entry>
         <entry name="GreenY" type="Double">
-            <default>0.2000</default>
+            <default>0.4333</default>
         </entry>
         <entry name="BlueX" type="Double">
-            <default>-0.2900</default>
+            <default>-0.3000</default>
         </entry>
         <entry name="BlueY" type="Double">
-            <default>-0.2900</default>
+            <default>-0.2167</default>
         </entry>
 
         <!-- Unsharp amount layered on top of the shift, 0.0 .. 1.5. -->
@@ -50,7 +47,7 @@
         <!-- Area resample in linear light. Each channel's light moves by
              exactly its shift, at any contrast. Overrides Bicubic. -->
         <entry name="LinearLight" type="Bool">
-            <default>true</default>
+            <default>false</default>
         </entry>
         <!-- Gate Sharpen to text-like pixels. Never gates the shift itself. -->
         <entry name="Adaptive" type="Bool">

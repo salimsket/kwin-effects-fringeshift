@@ -180,8 +180,8 @@ singleton in one process means the second `instance()` is dropped with only a
   parameter sets are `constexpr FringeShiftParams` in
   [FringeShiftKCM.cpp](src/kcm/FringeShiftKCM.cpp) — a second copy of five
   `presets.conf` blocks, because nothing reads that file at runtime.
-  `osorio321urx` currently equals the `.kcfg` defaults, `LinearLight` included;
-  that is coincidence, not a link.
+  `osorio321urx` currently equals the `.kcfg` defaults; that is coincidence,
+  not a link.
 
 `ShowMask` has no widget on purpose — it is a debug flag, and the dialog leaves
 unbound entries alone.
@@ -276,8 +276,10 @@ Pipeline in `main()`:
    light it moves each channel by exactly its shift and conserves its light,
    at any contrast. That is the physical model: an emitter `f` off-centre
    collects `1 − f` and `f` of two pixels' light. `linear-light-shift` and
-   `linear-light-dc` pin it. A microscope found the emitter offset at 0.49 px,
-   against 0.60–0.65 as the best default-path setting by eye.
+   `linear-light-dc` pin it. It is **off by default**: with no compensation,
+   and with blends into dark strokes much brighter in light, it looked clearly
+   blurry on text on the real panel. A microscope found the emitter offset at
+   0.49 px; the calibrated default-path setting is 0.65.
 
 The `ShaderTrait` set at load time
 ([fringeshifteffect.cpp:70](src/fringeshifteffect.cpp#L70)) —
@@ -360,13 +362,13 @@ any host: it is never a skip.
 Four things to know before touching the thresholds:
 
 1. **Displacement gain is not 1, and is not a constant of the kernel.** Measured
-   0.982 of nominal at f = 1/16 and **0.735 at f = 0.25** for the shipped
-   geometry's (OSORIO-321URX) centred 0.245 px, on the Catmull-Rom path. Catmull-Rom is symmetric but not ideal, and its
+   0.980 of nominal at f = 1/16 and **0.736 at f = 0.25** for the shipped
+   OSORIO-321URX's centred 0.325 px, on the Catmull-Rom path. Catmull-Rom is symmetric but not ideal, and its
    phase response under-delivers by more as frequency rises. `shift-gain` and
    `proportional-shift` both pin values that **move when the default preset
    moves** — gain rises with the fraction, because the in-phase Laplacian term
    is quadratic in it and partly offsets the phase lag. OSORIO's 0.25 px read
-   0.982 / 0.736, the 0.225 px default before it read 0.982 / 0.733, and the 0.10 px one before that read
+   0.982 / 0.736 (and `mtf-at-f0.25` 1.042, against 1.081 now), the 0.225 px default before it read 0.982 / 0.733, and the 0.10 px one before that read
    0.979 / 0.680, with a `proportional-shift` spread about half the current one.
    The closed form is in the check's comment and reproduces the measured values
    to five digits — if either check moves, compute the expected value before
@@ -385,12 +387,12 @@ Four things to know before touching the thresholds:
    check that only varies along y inherits the same blind spot.
 
    The shipped defaults are not vertical-only — OSORIO-321URX carries
-   `RedX +0.20 / GreenX +0.13 / BlueX -0.29` — so `defaults` moves an
+   `RedX +0.20 / GreenX +0.05 / BlueX -0.30` — so `defaults` moves an
    x-varying grating.
 
-   The schema now ships `LinearLight` on. Checks 2–10 measure the Catmull-Rom
-   path's own claims (MTF compensation, phase gain), so `main()` copies the
-   schema defaults and turns `linearLight` off for them. Checks 12–13 turn it
+   Checks 2–10 measure the Catmull-Rom path's own claims (MTF compensation,
+   phase gain), so `main()` copies the schema defaults and forces
+   `linearLight` off for them, whatever the schema ships. Checks 12–13 turn it
    on explicitly.
    `separable-compensation` builds a vertical-only set by zeroing the x
    components rather than passing `defaults`; handing it the raw defaults
