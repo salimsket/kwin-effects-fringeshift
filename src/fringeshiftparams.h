@@ -61,6 +61,11 @@ struct FringeShiftParams
     float sharpen = 0.0f;
     /** Catmull-Rom resample; false selects bilinear (softer, no ringing). */
     bool bicubic = true;
+    /**
+     * Area resample in linear light: each channel's light moves by exactly its
+     * shift at any contrast. Overrides `bicubic` and the MTF compensation.
+     */
+    bool linearLight = false;
     /** Gate `sharpen` to text-like pixels. Never gates the shift itself. */
     bool adaptive = true;
     /** Debug: render the text mask instead of the corrected image. */
@@ -115,6 +120,7 @@ struct FringeShiftParams
         shader.setUniform("shiftB", shiftB);
         shader.setUniform("sharpen", sharpen);
         shader.setUniform("bicubic", bicubic ? 1 : 0);
+        shader.setUniform("linearLight", linearLight ? 1 : 0);
         shader.setUniform("adaptive", adaptive ? 1 : 0);
         shader.setUniform("showMask", showMask ? 1 : 0);
     }

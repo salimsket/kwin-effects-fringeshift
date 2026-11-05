@@ -161,13 +161,15 @@ own breaks the ABI match.
 ## Configuration
 
 **Configure…** beside the effect in *Desktop Effects* opens a page with a slider
-and spin box per channel axis, the sharpen amount, and the two resample toggles.
+and spin box per channel axis, the sharpen amount, and the resample toggles.
 It writes the keys below and tells the compositor to re-read them, so Apply is
 enough.
 
-A row of preset buttons loads four archived parameter sets — **MPE** and **SPE**
-(two readings of the panel's emitter geometry), **Osorio** (converged by hand on
-live hardware; what ships), and **Triad** (a conservative floor). A button only
+A row of preset buttons loads five archived parameter sets — **MPE** and **SPE**
+(two readings of the panel's emitter geometry), **Osorio** (a reference diagram,
+tuned by hand on live hardware), **OSORIO-321URX** (Osorio checked under a
+microscope, with `LinearLight`; what ships), and **Triad** (a conservative
+floor). A button only
 fills the controls; Apply still commits and Reset still undoes.
 
 Same thing from the shell — `kwinrc`, group `[Effect-fringeshift]`, physical
@@ -175,17 +177,22 @@ pixels, `+X` right and `+Y` down:
 
 ```sh
 kwriteconfig6 --file kwinrc --group Effect-fringeshift --key GreenY 0.12
-kwriteconfig6 --file kwinrc --group Effect-fringeshift --key RedY -0.06
-qdbus6 org.kde.KWin /KWin reconfigure
+kwriteconfig6 --file kwinrc --group Effect-fringeshift --key RedY -- -0.06
+busctl --user call org.kde.KWin /Effects org.kde.kwin.Effects reconfigureEffect s fringeshift
 ```
+
+`reconfigureEffect` is the call that reloads this effect. The general
+`/KWin reconfigure` does not. A negative value needs `--` before it, or
+`kwriteconfig6` reads the minus sign as an option.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `RedX` / `RedY` | `0.200` / `-0.300` | red content shift, px |
-| `GreenX` / `GreenY` | `0.050` / `0.200` | green content shift, px |
-| `BlueX` / `BlueY` | `-0.300` / `-0.300` | blue content shift, px |
+| `RedX` / `RedY` | `0.200` / `-0.290` | red content shift, px |
+| `GreenX` / `GreenY` | `0.130` / `0.200` | green content shift, px |
+| `BlueX` / `BlueY` | `-0.290` / `-0.290` | blue content shift, px |
 | `Sharpen` | `0.0` | unsharp amount on top of the shift, 0 – 1.5 |
 | `Bicubic` | `true` | Catmull-Rom resample; `false` = bilinear (softer, no ringing) |
+| `LinearLight` | `true` | area resample in linear light: the light moves by exactly the shift, at any contrast. Overrides `Bicubic` — see [below](#nominal-versus-delivered-shift) |
 | `Adaptive` | `true` | gate `Sharpen` to text-like pixels (never gates the shift) |
 | `ShowMask` | `false` | debug: render the text mask instead of the image |
 
@@ -193,11 +200,10 @@ Shifts are clamped to ±1 px. `ShowMask` is a debug flag with no widget on the
 settings page; set it by hand. With every shift at 0 and `Sharpen` at 0 the
 effect unredirects every window, so an all-zero configuration costs nothing.
 
-The defaults carry two separations, both 0.500 px: vertically between green
-and the red/blue pair beneath it (the green/magenta fringe itself), and
-horizontally between red and blue (red on left edges, blue on right) — a
-symmetric diamond in the reference diagram this reading was taken from. Why
-they are written the way they are is
+The defaults are the emitter offsets measured on the panel, negated: green
+0.49 px above the red/blue pair (the green/magenta fringe itself), red and
+blue 0.49 px apart horizontally (red on left edges, blue on right), and green
+0.07 px right of red. Where they come from is
 [below](#where-the-default-numbers-come-from).
 
 ## Known limits
@@ -223,7 +229,8 @@ they are written the way they are is
   straight to the display controller — the same honest limit the Windows
   version has with fullscreen-exclusive apps.
 - A configured shift is a nominal, not a delivered, displacement — see
-  [gain](#nominal-versus-delivered-shift).
+  [gain](#nominal-versus-delivered-shift). With `LinearLight` on, the light
+  moves by exactly the configured shift.
 
 ---
 
@@ -247,21 +254,30 @@ UI chrome included.
 
 ## Where the default numbers come from
 
-Read directly off a labelled reference diagram of this panel's subpixel
-layout — two sample points per emitter, so the repeating tile is visible, not
+**OSORIO-321URX**, the default, is Osorio checked under a USB microscope. Solid
+red, green and blue frames, fitted over the whole emitter lattice in two
+sessions at different zoom, put red at (−0.07, +0.49) and blue at
+(+0.41 … +0.43, +0.49) px relative to green. The content shifts are those
+offsets negated. The vertical 0.49 confirms Osorio's 0.50. Horizontally the
+red–blue spacing agrees, and green sits 0.08 px further right than Osorio
+has it. With `LinearLight` on, the light moves by exactly these amounts, so
+the measured geometry is the setting; no tuning factor sits between them.
+
+**Osorio**, the reading it refines, was read directly off a labelled reference
+diagram of this panel's subpixel layout — two sample points per emitter, so the repeating tile is visible, not
 just one cell — and confirmed by eye on live hardware with `fringe-tune`.
 Content shift is the emitter's position negated (an emitter sitting high or
 left gets a positive, i.e. opposite, correction), except `GreenX`, which the
 diagram places close enough to the R/B horizontal midpoint that live tuning,
 not the diagram, got the final sign.
 
-The values are written *uncentred* — `RedY`/`BlueY` −0.300 against `GreenY`
-0.200 — which is the emitter geometry read literally. The shader subtracts
-the mean of the three before resampling, so what reaches the resample is
-±0.250 on every channel and no channel carries a larger fraction; writing the
-same geometry pre-centred is bit-identical.
+The values are written *uncentred* — `RedY`/`BlueY` −0.290 against `GreenY`
+0.200. The shader subtracts the midpoint of the smallest and largest of the
+three before resampling, so what reaches the resample is ±0.245 on every
+channel vertically and no channel carries a larger fraction; writing the same
+geometry pre-centred is bit-identical.
 
-`presets.conf` (`OSORIO`) carries the diagram coordinates and the full
+`presets.conf` (`OSORIO-321URX`, `OSORIO`) carries the measurements, the diagram coordinates and the full
 derivation, plus twenty synthetic variants for by-eye comparison via
 `fringe-presets`. `presets.legacy.conf` holds the earlier readings this
 superseded — a lattice average from a macro photograph (0.437/0.449 px), a
@@ -274,9 +290,9 @@ runtime.
 A configured shift is a **nominal**, not a delivered, displacement. Catmull-Rom
 is an interpolating kernel, not an ideal one, so its phase response
 under-delivers the requested offset by an amount that grows with frequency:
-measured 0.982 of nominal at f = 1/16 cyc/px and 0.736 at f = 0.25, the
-text-edge end. Ask for the default preset's ±0.250 px of centred green and
-roughly 0.184 px arrives where it matters most.
+measured 0.982 of nominal at f = 1/16 cyc/px and 0.735 at f = 0.25, the
+text-edge end. Ask for the default geometry's ±0.245 px of centred green on
+this path and roughly 0.180 px arrives where it matters most.
 
 Gain depends on the fraction as well as the frequency — the in-phase Laplacian
 term grows as its square and partly offsets the kernel's phase lag, so smaller
@@ -285,6 +301,40 @@ before OSORIO read 0.733 at f = 0.25, and a 0.10 px one before that read
 0.680). The response stays proportional to within a few percent (see
 `proportional-shift` below), so this is a scale factor to be aware of when
 reading a preset, not a non-linearity.
+
+### In light
+
+The numbers above are in code values. The panel adds light, so what moves a
+fringe is where each channel's *light* goes. On the default path, two things
+make less light move than the code values suggest:
+
+- On a black/white edge, Catmull-Rom's negative lobes and the Laplacian term
+  overshoot below 0 and above 1. The clamp cuts that off, and the shift that
+  the overshoot carried is lost.
+- The rest is weighted by code value, and code values near black carry almost
+  no light.
+
+`linear-light-shift` measures it. With the default geometry (0.490 px between
+green and red/blue), this path moves the light 0.286 px on a black/white edge
+and 0.473 px on a 10 % / 90 % edge. So the same setting is a different correction
+on different content. A microscope session on this panel showed it: the
+emitter offset is 0.49 px, but the best setting by eye was 0.60–0.65 on
+black text and lower on mid-contrast content.
+
+**`LinearLight`** removes both losses. It decodes each tap to light with
+KWin's own `encodingToNits()`, resamples with the tent, and adds no
+compensation. This is the physical model of the panel: an emitter that sits a
+fraction `f` off the pixel centre collects `1 − f` of one pixel's light and
+`f` of its neighbour's. The weights are non-negative, so nothing overshoots.
+Each channel's light moves by exactly its shift, at any contrast, and its
+total light stays the same. With it on, set the shifts to the emitter
+geometry itself: the defaults are that geometry.
+
+The cost is the MTF compensation, which this path does not have. Fine detail
+along the shift axis gets the softness of the area resample. `LinearLight` is
+on by default. Turn it off to get the Catmull-Rom path and its compensation
+back; then a shift needs a larger setting than the geometry, by an amount
+that depends on the content.
 
 ## How it works
 
@@ -309,9 +359,10 @@ reading a preset, not a non-linearity.
   25 texture fetches per pixel. Fetching per channel took 64. The bound holds
   because every shift is clamped to ±1 px, so each centred shift is within
   ±1 px too;
-- resampling happens in the source encoding, not linear light — in linear light
-  the taps re-weight toward the bright side of every edge, which is exactly the
-  stroke-weight change this effect must avoid.
+- by default the resample runs in the source encoding, which keeps the mean
+  code value of every edge. `LinearLight` runs it in light instead, which
+  keeps each channel's light and moves it by exactly the shift — see
+  [In light](#in-light).
 
 ## KWin version differences
 
@@ -373,9 +424,11 @@ failure.
 
 KWin's `colormanagement.glsl` and `saturation.glsl` are compiled into the
 compositor and cannot be resolved outside it, so the harness substitutes the
-identity stubs in [tests/stubs/](tests/stubs/). That is faithful to what is
-under test: the resample deliberately happens in the source encoding, *before*
-that tail runs.
+stubs in [tests/stubs/](tests/stubs/). The colour-management stub keeps a
+real transfer function, KWin's sRGB branch and its inverse, so that the
+`LinearLight` path decodes to light as it does in KWin. On the default path
+that is a round trip, and the harness measures in the source encoding as
+before. Colorimetry, tone mapping and saturation are identity.
 
 The stubs cannot see a change in KWin's real include files, so two more tests,
 `shader-kwin-es300` and `shader-kwin-es100`, compile the shader against them
@@ -398,6 +451,8 @@ or `glslangValidator`, CMake prints a note and leaves the two tests out.
 | `integer-step-exact` | a whole-texel step costs no MTF at all |
 | `separable-compensation` | a vertical correction leaves horizontal detail alone |
 | `half-texel-stable` | at an exact half-texel fraction, the result does not depend on window size |
+| `linear-light-shift` | with `LinearLight`, the light moves by exactly the shift on black/white and lifted edges; prints what the default path delivers |
+| `linear-light-dc` | with `LinearLight`, each channel's total light is unchanged |
 
 > [!NOTE]
 > Direction is deliberately out of scope: the harness cannot see the axis flip

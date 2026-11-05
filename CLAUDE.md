@@ -11,7 +11,7 @@ Five source files, ~500 lines total, and the split is lopsided on purpose:
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [src/shaders/fringeshift.frag](src/shaders/fringeshift.frag) | ~280 | **All of the signal processing.** The actual product. |
+| [src/shaders/fringeshift.frag](src/shaders/fringeshift.frag) | ~310 | **All of the signal processing.** The actual product. |
 | [src/fringeshifteffect.cpp](src/fringeshifteffect.cpp) | ~270 | KWin/Qt lifecycle glue: shader load, window redirection, shortcut. |
 | [src/fringeshifteffect.h](src/fringeshifteffect.h) | ~120 | Class declaration. |
 | [src/fringeshiftparams.h](src/fringeshiftparams.h) / [.cpp](src/fringeshiftparams.cpp) | ~200 | The shader's parameter set and its preconditions. |
@@ -23,7 +23,7 @@ Five source files, ~500 lines total, and the split is lopsided on purpose:
 
 The C++ owns *no* image math. Every pixel decision lives in GLSL. Anything that
 changes how the correction looks belongs in the `.frag`; the `.cpp` only decides
-*whether* the shader runs and *what seven uniforms* it runs with.
+*whether* the shader runs and *what eight uniforms* it runs with.
 
 ## The C++ side
 
@@ -57,7 +57,7 @@ window stays redirected either way — only that frame's route changes.
 
 **State**:
 
-- `m_params` — a `FringeShiftParams`, the seven shader uniforms.
+- `m_params` — a `FringeShiftParams`, the eight shader uniforms.
 - `m_enabled` — runtime on/off from the global shortcut. **Not persisted**, and
   deliberately separate from config so A/B toggling doesn't dirty `kwinrc`.
 - `m_windows` — `unordered_set<EffectWindow*>` of currently-redirected windows.
@@ -176,11 +176,12 @@ singleton in one process means the second `instance()` is dropped with only a
   them is what dirties the page, makes Apply commit and Reset revert, and keeps a
   click out of `kwinrc` until the user asks. Writing the settings object would
   desynchronise the dirty state from both the widgets and the file. They set every
-  bound entry *except* `ShowMask`, which has no widget to turn back off. The four
+  bound entry *except* `ShowMask`, which has no widget to turn back off. The five
   parameter sets are `constexpr FringeShiftParams` in
-  [FringeShiftKCM.cpp](src/kcm/FringeShiftKCM.cpp) — a second copy of four
-  `presets.conf` blocks, because nothing reads that file at runtime. `osorio`
-  currently equals the `.kcfg` defaults; that is coincidence, not a link.
+  [FringeShiftKCM.cpp](src/kcm/FringeShiftKCM.cpp) — a second copy of five
+  `presets.conf` blocks, because nothing reads that file at runtime.
+  `osorio321urx` currently equals the `.kcfg` defaults, `LinearLight` included;
+  that is coincidence, not a link.
 
 `ShowMask` has no widget on purpose — it is a debug flag, and the dialog leaves
 unbound entries alone.
@@ -261,10 +262,22 @@ Pipeline in `main()`:
    shadows.
 7. Same tail as KWin's `base.frag`, in the same order:
    `encodingToNits` → `colorimetryTransform` → `adjustSaturation` → `modulation` →
-   `doTonemapping` → `nitsToDestinationEncoding`. The resample above runs in the
-   **source encoding, not linear light** — in linear light the taps re-weight
-   toward the bright side of every edge, i.e. exactly the stroke-weight change
-   this effect exists to avoid.
+   `doTonemapping` → `nitsToDestinationEncoding`. By default the resample above
+   runs in the **source encoding**, which keeps the mean code value of an edge.
+8. **`LinearLight`** is the second path. Each tap that a weight uses goes
+   through `encodingToNits()` first (KWin's own decode, so every source
+   transfer function and premultiplied alpha are handled), the kernel is the
+   tent, and `ca` is 0. The result is already in nits, so the tail skips its
+   first step, and the clamp bounds are black and white decoded at the centre
+   alpha. Why it exists: on a black/white edge the default path's Catmull-Rom
+   lobes and Laplacian overshoot are clamped, and the rest is weighted by code
+   value. A 0.500 px setting moves the light only 0.292 px there, and 0.482 px
+   on a 10/90 % edge. The tent's weights are non-negative and sum to 1, so in
+   light it moves each channel by exactly its shift and conserves its light,
+   at any contrast. That is the physical model: an emitter `f` off-centre
+   collects `1 − f` and `f` of two pixels' light. `linear-light-shift` and
+   `linear-light-dc` pin it. A microscope found the emitter offset at 0.49 px,
+   against 0.60–0.65 as the best default-path setting by eye.
 
 The `ShaderTrait` set at load time
 ([fringeshifteffect.cpp:70](src/fringeshifteffect.cpp#L70)) —
@@ -332,11 +345,13 @@ any host: it is never a skip.
   flake fills from the pinned `kdePackages.kwin.src` (the nixpkgs KWin patches
   do not touch them). Without it, or without `glslangValidator`, CMake leaves
   the two tests out with a status note.
-- [tests/stubs/](tests/stubs/) — identity stand-ins for KWin's
+- [tests/stubs/](tests/stubs/) — stand-ins for KWin's
   `colormanagement.glsl` and `saturation.glsl`, which are compiled into the
-  compositor and unresolvable outside it. Faithful because the resample runs in
-  the source encoding, before that tail.
-- [tests/measure.cpp](tests/measure.cpp) — fifteen checks. Eleven measure the
+  compositor and unresolvable outside it. `encodingToNits` is a copy of KWin's
+  sRGB branch and `nitsToDestinationEncoding` its inverse, so the
+  `LinearLight` path decodes to real light and the default path round-trips
+  to its own values. Everything else is identity.
+- [tests/measure.cpp](tests/measure.cpp) — seventeen checks. Thirteen measure the
   shader, each tied to a specific README claim. The other four
   (`checkParameterDomain()`) cover `FringeShiftParams`, the only pure code here:
   the clamp range, the sharpen floor, non-finite rejection, and the
@@ -345,13 +360,13 @@ any host: it is never a skip.
 Four things to know before touching the thresholds:
 
 1. **Displacement gain is not 1, and is not a constant of the kernel.** Measured
-   0.982 of nominal at f = 1/16 and **0.736 at f = 0.25** for the shipped
-   preset's (OSORIO) centred 0.25 px. Catmull-Rom is symmetric but not ideal, and its
+   0.982 of nominal at f = 1/16 and **0.735 at f = 0.25** for the shipped
+   geometry's (OSORIO-321URX) centred 0.245 px, on the Catmull-Rom path. Catmull-Rom is symmetric but not ideal, and its
    phase response under-delivers by more as frequency rises. `shift-gain` and
    `proportional-shift` both pin values that **move when the default preset
    moves** — gain rises with the fraction, because the in-phase Laplacian term
-   is quadratic in it and partly offsets the phase lag. The 0.225 px default
-   before OSORIO read 0.982 / 0.733, and the 0.10 px one before that read
+   is quadratic in it and partly offsets the phase lag. OSORIO's 0.25 px read
+   0.982 / 0.736, the 0.225 px default before it read 0.982 / 0.733, and the 0.10 px one before that read
    0.979 / 0.680, with a `proportional-shift` spread about half the current one.
    The closed form is in the check's comment and reproduces the measured values
    to five digits — if either check moves, compute the expected value before
@@ -369,9 +384,14 @@ Four things to know before touching the thresholds:
    `separable-compensation` is the only check looking down the x axis. A new
    check that only varies along y inherits the same blind spot.
 
-   The shipped defaults are no longer vertical-only — OSORIO carries
-   `RedX +0.20 / GreenX +0.05 / BlueX -0.30` — so `defaults` now moves an
+   The shipped defaults are not vertical-only — OSORIO-321URX carries
+   `RedX +0.20 / GreenX +0.13 / BlueX -0.29` — so `defaults` moves an
    x-varying grating.
+
+   The schema now ships `LinearLight` on. Checks 2–10 measure the Catmull-Rom
+   path's own claims (MTF compensation, phase gain), so `main()` copies the
+   schema defaults and turns `linearLight` off for them. Checks 12–13 turn it
+   on explicitly.
    `separable-compensation` builds a vertical-only set by zeroing the x
    components rather than passing `defaults`; handing it the raw defaults
    asserts the negation of separability and fails on a correct shader. Its

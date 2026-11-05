@@ -20,6 +20,8 @@
 #include <numbers>
 #include <random>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -177,6 +179,78 @@ Image bars()
     return image;
 }
 
+/** The sRGB decode the stub's encodingToNits() uses: code value to light. */
+double toLight(double encoded)
+{
+    return encoded <= 0.04045 ? encoded / 12.92 : std::pow((encoded + 0.055) / 1.055, 2.4);
+}
+
+constexpr int bandPeriod = 16;
+constexpr int bandWidth = 6;
+
+/**
+ * Hard horizontal bands, grey and opaque: rows `bandWidth` long at @a bright,
+ * the rest of each `bandPeriod` at @a dark (both are code values). A black and
+ * white edge is where the source-encoding path loses shift to its clamp; the
+ * lifted pair is where it does not.
+ */
+Image bands(double dark, double bright)
+{
+    Image image{imageSize, imageSize};
+    for (int y = 0; y < imageSize; ++y) {
+        const double value = (y % bandPeriod) < bandWidth ? bright : dark;
+        for (int x = 0; x < imageSize; ++x) {
+            for (int c = 0; c < 3; ++c) {
+                image.at(x, y, c) = float(value);
+            }
+            image.at(x, y, 3) = 1.0f;
+        }
+    }
+    return image;
+}
+
+/** Light of @a channel per row, averaged over the interior columns. */
+std::vector<double> lightProfile(const Image &image, int channel)
+{
+    std::vector<double> rows(std::size_t(image.height), 0.0);
+    for (int y = 0; y < image.height; ++y) {
+        double total = 0.0;
+        for (int x = interiorBegin; x < interiorEnd; ++x) {
+            total += toLight(image.at(x, y, channel));
+        }
+        rows[std::size_t(y)] = total / double(interiorEnd - interiorBegin);
+    }
+    return rows;
+}
+
+/**
+ * Mean movement, in rows, of the light centroid of each bright band, above the
+ * dark level. The window reaches 3 rows past each band edge, which holds any
+ * shift up to the +/-1 px clamp.
+ */
+double lightCentroidShift(const std::vector<double> &before, const std::vector<double> &after, double darkLight)
+{
+    double total = 0.0;
+    int count = 0;
+    for (int start = interiorBegin; start + bandPeriod <= interiorEnd; start += bandPeriod) {
+        double momentBefore = 0.0;
+        double massBefore = 0.0;
+        double momentAfter = 0.0;
+        double massAfter = 0.0;
+        for (int y = start - 3; y < start + bandWidth + 3; ++y) {
+            const double b = before[std::size_t(y)] - darkLight;
+            const double a = after[std::size_t(y)] - darkLight;
+            momentBefore += b * double(y);
+            massBefore += b;
+            momentAfter += a * double(y);
+            massAfter += a;
+        }
+        total += momentAfter / massAfter - momentBefore / massBefore;
+        ++count;
+    }
+    return total / double(count);
+}
+
 int failures = 0;
 
 void check(bool passed, const char *name, const std::string &detail)
@@ -269,6 +343,7 @@ void checkParameterDomain()
         // change nothing.
         FringeShiftParams switched;
         switched.bicubic = false;
+        switched.linearLight = true;
         switched.adaptive = false;
 
         const bool passed = zero.isIdentity() && switched.isIdentity()
@@ -324,12 +399,18 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    const FringeShiftParams defaults = schemaDefaults();
-    std::printf("defaults from schema: R(%+.3f,%+.3f) G(%+.3f,%+.3f) B(%+.3f,%+.3f) sharpen %.2f bicubic %d\n\n",
+    // The shipped geometry, on the source-encoding (Catmull-Rom) path. Checks
+    // 2-10 measure that path's own claims -- MTF compensation, phase gain --
+    // which the linear-light path does not make, so linearLight is turned off
+    // here whatever the schema ships. Checks 12-13 turn it on explicitly.
+    const FringeShiftParams schema = schemaDefaults();
+    FringeShiftParams defaults = schema;
+    defaults.linearLight = false;
+    std::printf("defaults from schema: R(%+.3f,%+.3f) G(%+.3f,%+.3f) B(%+.3f,%+.3f) sharpen %.2f bicubic %d linearLight %d\n\n",
                 defaults.shiftR.x(), defaults.shiftR.y(),
                 defaults.shiftG.x(), defaults.shiftG.y(),
                 defaults.shiftB.x(), defaults.shiftB.y(),
-                double(defaults.sharpen), defaults.bicubic ? 1 : 0);
+                double(defaults.sharpen), defaults.bicubic ? 1 : 0, schema.linearLight ? 1 : 0);
 
     // Pure, so it runs before the GL setup that everything below depends on.
     checkParameterDomain();
@@ -674,6 +755,81 @@ int main(int argc, char **argv)
             // Loose enough for the ~1e-5 resample difference that interpolation
             // error makes between two sizes, far below a centre that moved.
             check(worst < 1e-3, "half-texel-stable", format("max |delta| between window sizes", worst));
+        }
+
+        // 12. Linear light delivers the shift in LIGHT, at any contrast.
+        //
+        //     The panel adds light, so what moves a fringe is where each
+        //     channel's light is, not where its code values are. The light
+        //     centroid of every bright band must move by exactly that channel's
+        //     centred shift, on a black/white edge and on a lifted one alike.
+        //
+        //     The source-encoding path is measured the same way and printed,
+        //     not asserted: it is the reason this path exists. On a black/white
+        //     edge its Catmull-Rom lobes and Laplacian overshoot get clamped,
+        //     and what is left is weighted by code value, not by light.
+        //
+        //     Vertical-only defaults, for the reason given in check 10.
+        {
+            FringeShiftParams vertical = defaults;
+            vertical.shiftR.setX(0.0f);
+            vertical.shiftG.setX(0.0f);
+            vertical.shiftB.setX(0.0f);
+            vertical.sharpen = 0.0f;
+            FringeShiftParams linear = vertical;
+            linear.linearLight = true;
+            vertical = FringeShiftParams::clamped(vertical);
+            linear = FringeShiftParams::clamped(linear);
+
+            // Centred y shifts, restated only to get the expected magnitude.
+            const double red = double(linear.shiftR.y());
+            const double green = double(linear.shiftG.y());
+            const double blue = double(linear.shiftB.y());
+            const double centre = -(std::min({red, green, blue}) + std::max({red, green, blue})) * 0.5;
+            const std::array<double, 3> expected{red + centre, green + centre, blue + centre};
+
+            double worstShift = 0.0;
+            double worstLight = 0.0;
+            bool opposed = true;
+            std::string detail;
+            for (const auto &[dark, bright] : {std::pair{0.0, 1.0}, std::pair{0.1, 0.9}}) {
+                const Image input = bands(dark, bright);
+                const Image outLinear = runner->run(input, linear);
+                const Image outCode = runner->run(input, vertical);
+                std::array<double, 3> moved{};
+                std::array<double, 3> codeMoved{};
+                for (int c = 0; c < 3; ++c) {
+                    const std::vector<double> before = lightProfile(input, c);
+                    const std::vector<double> afterLinear = lightProfile(outLinear, c);
+                    moved[std::size_t(c)] = lightCentroidShift(before, afterLinear, toLight(dark));
+                    codeMoved[std::size_t(c)] = lightCentroidShift(before, lightProfile(outCode, c), toLight(dark));
+                    worstShift = std::max(worstShift, std::abs(std::abs(moved[std::size_t(c)]) - std::abs(expected[std::size_t(c)])));
+
+                    double lightIn = 0.0;
+                    double lightOut = 0.0;
+                    for (int y = interiorBegin; y < interiorEnd; ++y) {
+                        lightIn += before[std::size_t(y)];
+                        lightOut += afterLinear[std::size_t(y)];
+                    }
+                    worstLight = std::max(worstLight, std::abs(lightOut / lightIn - 1.0));
+                }
+                // Magnitudes and relative direction only: green against red/blue.
+                opposed = opposed && (moved[1] > 0.0) != (moved[0] > 0.0) && std::abs(moved[0] - moved[2]) < 1e-4;
+                char buffer[160];
+                std::snprintf(buffer, sizeof(buffer), "%.1f/%.1f: G-R light %.3f (code path %.3f)  ",
+                              dark, bright, std::abs(moved[1] - moved[0]), std::abs(codeMoved[1] - codeMoved[0]));
+                detail += buffer;
+            }
+            char buffer[64];
+            std::snprintf(buffer, sizeof(buffer), "asked %.3f; ", std::abs(expected[1] - expected[0]));
+            check(worstShift < 1e-3 && opposed, "linear-light-shift",
+                  buffer + detail + format("worst |error|", worstShift, " px"));
+
+            // 13. ...and moves light without adding or removing any: the
+            //     tent's weights are non-negative and sum to 1, so no clamp
+            //     engages. This is the stroke-weight argument of check 3,
+            //     stated in light.
+            check(worstLight < 1e-4, "linear-light-dc", format("max |light out / in - 1|", worstLight));
         }
     } catch (const GlError &error) {
         std::fprintf(stderr, "\nGL failure: %s\n", error.what());

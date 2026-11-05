@@ -24,6 +24,7 @@ uniform vec2 shiftG;
 uniform vec2 shiftB;
 uniform float sharpen;   // unsharp amount, 0 .. 1.5
 uniform int bicubic;     // 1 = Catmull-Rom resample, 0 = bilinear
+uniform int linearLight; // 1 = area resample in linear light (overrides bicubic)
 uniform int adaptive;    // 1 = gate `sharpen` to text-like pixels
 uniform int showMask;    // 1 = render the mask instead of the image
 
@@ -177,9 +178,22 @@ void main()
     // also overshot 1.050 vs 1.009 for this path at 0.10px — 5x the clipped
     // ringing, which reads as aliasing on text edges. This path stays in the
     // source encoding and is proportional, at the cost of ~0.2% stroke weight.
-    bool sharp = bicubic != 0;
+    //
+    // LINEAR LIGHT is the other path. It decodes each tap to light with KWin's
+    // own encodingToNits(), resamples with the tent, and adds NO compensation.
+    // That is the physical model of the panel: an emitter that sits a fraction
+    // f off the pixel centre collects 1-f of one pixel's light and f of its
+    // neighbour's. The kernel is non-negative, so nothing overshoots and the
+    // clamp never engages. Each channel's light centroid then moves by exactly
+    // its shift, and its total light is unchanged, at any contrast.
+    // The source-encoding path cannot do either. Catmull-Rom's negative lobes and
+    // the Laplacian both overshoot, and on a black/white edge the clamp cuts
+    // that off: about 40% of a 0.2 px shift is lost. The 60% that is left is
+    // weighted by the code values, not by light.
+    bool linear = linearLight != 0;
+    bool sharp = bicubic != 0 && !linear;
     float amt = sharpen * mask;
-    float ca = sharp ? 0.8625 : 1.7216;
+    float ca = linear ? 0.0 : (sharp ? 0.8625 : 1.7216);
     // Per axis, never isotropic. The resample is SEPARABLE: the x fraction
     // costs MTF along x only, the y fraction along y only. A single coefficient
     // from dot(f, f) charges each axis for both, which over-compensates a
@@ -230,6 +244,13 @@ void main()
     // The 2D Laplacian is split into its axis components, because the
     // compensation above is per axis: an x component taken along the centre
     // row and a y component taken down the centre column.
+    //
+    // In linear light, a tap is decoded only if a weight uses it. The tent
+    // reaches 2 taps per axis, so with Sharpen at 0 that is at most 12 of the
+    // 25. The weights depend only on the uniforms, so every pixel takes the
+    // same branch. An undecoded tap has weight 0 and kx = ky = 0, so its
+    // encoded value never reaches the result.
+    bool lapUsed = amt > 0.0;
     vec3 res = vec3(0.0);
     vec3 lapAlongX = vec3(0.0);
     vec3 lapAlongY = vec3(0.0);
@@ -246,12 +267,15 @@ void main()
         vec3 rowCtr = vec3(0.0);
         for (int i = 0; i < 5; ++i) {
             vec4 t = fetchTexel(n + vec2(float(i) - 2.0, o));
-            rowW += wX[i] * t.rgb;
-            rowLap += lapX[i] * t.rgb;
-            rowCtr += ctrX[i] * t.rgb;
             if (i == 2 && j == 2) {
                 a = t.a;
             }
+            if (linear && (lapUsed || any(greaterThan(wX[i] * wY, vec3(0.0))))) {
+                t = encodingToNits(t, sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y);
+            }
+            rowW += wX[i] * t.rgb;
+            rowLap += lapX[i] * t.rgb;
+            rowCtr += ctrX[i] * t.rgb;
         }
         res += wY * rowW;
         lapAlongX += ctrY * rowLap;
@@ -260,16 +284,25 @@ void main()
 
     // Alpha is never shifted: displacing the window's own coverage would fray
     // its rounded corners and its shadow. RGB stays premultiplied, so it clamps
-    // to alpha rather than to 1.
-    vec3 rgb = clamp(res - kx * lapAlongX - ky * lapAlongY, 0.0, a);
+    // to alpha rather than to 1. In linear light the bounds are black and white
+    // at that alpha, decoded the same way as the taps.
+    vec3 lo = vec3(0.0);
+    vec3 hi = vec3(a);
+    if (linear) {
+        lo = encodingToNits(vec4(vec3(0.0), a), sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y).rgb;
+        hi = encodingToNits(vec4(vec3(a), a), sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y).rgb;
+    }
+    vec3 rgb = clamp(res - kx * lapAlongX - ky * lapAlongY, lo, hi);
 
-    // Same tail as KWin's base.frag, in the same order. The resample above
-    // deliberately runs in the source encoding (roughly perceptual), not in
-    // linear light: shifting in linear light re-weights the taps toward the
-    // bright side of every edge, which is exactly the stroke-weight change this
-    // effect must not introduce.
+    // Same tail as KWin's base.frag, in the same order. On the source-encoding
+    // path the result is still encoded, so the tail decodes it first. On the
+    // linear-light path it is already in nits, and the tail starts one step
+    // later. Both orders give the same colorimetry, because the resample is
+    // linear and colorimetryTransform is a matrix.
     vec4 result = vec4(rgb, a);
-    result = encodingToNits(result, sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y);
+    if (!linear) {
+        result = encodingToNits(result, sourceNamedTransferFunction, sourceTransferFunctionParams.x, sourceTransferFunctionParams.y);
+    }
     result.rgb = (colorimetryTransform * vec4(result.rgb, 1.0)).rgb;
     result = adjustSaturation(result);
     result *= modulation;

@@ -62,6 +62,7 @@ FringeShiftParams FringeShiftParams::fromConfig(const KSharedConfig::Ptr &config
     raw.shiftB = QVector2D(float(FringeShiftSettings::blueX()), float(FringeShiftSettings::blueY()));
     raw.sharpen = float(FringeShiftSettings::sharpen());
     raw.bicubic = FringeShiftSettings::bicubic();
+    raw.linearLight = FringeShiftSettings::linearLight();
     raw.adaptive = FringeShiftSettings::adaptive();
     raw.showMask = FringeShiftSettings::showMask();
 
